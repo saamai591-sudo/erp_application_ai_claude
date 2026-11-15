@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { collapseOrNull } from "../utils/inputParse";
 
 // حقوق و دستمزد › تنظیمات › نوع پرداخت حقوق: سربرگ (کد، عنوان، فعال، پرداخت به: پرسنل / سازمان مرتبط با عامل [+ سازمان]، فایل دارد) + آیتم‌ها (عامل).
 // عاملِ آیتم یکی از این‌هاست: عامل حقوقِ طبقه‌ی «کسور» یا «هزینه کارفرما»، «وام» (نوع وام)، یا «خالص پرداختی» (هر نوع محاسبه).
@@ -7,7 +8,7 @@ import { prisma } from "../lib/prisma";
 export class PayTypeError extends Error {}
 
 export type PayItemField = "payrollComponentId" | "loanTypeId" | "netCalcTypeId";
-export const PAYABLE_KINDS = ["DEDUCTION", "EMPLOYER_COST"] as const;
+const PAYABLE_KINDS = ["DEDUCTION", "EMPLOYER_COST"] as const;
 const KIND_FA: Record<string, string> = { DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما" };
 
 export interface PayRef {
@@ -36,8 +37,6 @@ export async function loadPayRefOptions(): Promise<PayRef[]> {
   ];
 }
 
-const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ") : null);
-
 export interface PayTypeData {
   code?: number;
   title: string;
@@ -50,7 +49,7 @@ export interface PayTypeData {
 
 /** بدنه‌ی فرم → داده‌ی ذخیره (همه‌ی کنترل‌ها؛ ویرایش با excludeId) */
 export async function validatePaymentType(b: any, excludeId?: number): Promise<PayTypeData> {
-  const title = str(b.title);
+  const title = collapseOrNull(b.title);
   if (!title) throw new PayTypeError("عنوان الزامی است");
   if (await prisma.payrollPaymentType.findFirst({ where: { title, ...(excludeId ? { NOT: { id: excludeId } } : {}) } })) throw new PayTypeError("نوع پرداخت دیگری با همین عنوان وجود دارد");
 

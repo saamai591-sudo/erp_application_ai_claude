@@ -1,5 +1,6 @@
 import { IssueLineInput } from "./journalEntryService";
 import { accountLinksDetailType, resolveAccountDetailFieldsForCodes, resolveDetailTypeId } from "../utils/detailValues";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // ردیف‌های سندِ حسابداریِ چک دریافتنی روی معینی که ممکن است به «طرف‌حساب» وصل باشد (اسناد در جریان وصول، حساب بانکی).
@@ -10,10 +11,6 @@ import { accountLinksDetailType, resolveAccountDetailFieldsForCodes, resolveDeta
 
 type AccountRef = { id: number; detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null };
 export type CounterpartyCheque = { amount: number; party: { detailCode: string | null; category?: string; name?: string | null; firstName?: string | null; lastName?: string | null } };
-
-function partyName(p: CounterpartyCheque["party"]): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
 
 export async function buildChequeLedgerLines(opts: {
   account: AccountRef;
@@ -44,7 +41,7 @@ export async function buildChequeLedgerLines(opts: {
       debit: side === "debit" ? g.amount : 0,
       credit: side === "credit" ? g.amount : 0,
       fxRate: 1,
-      description: g.party ? `${description} — ${partyName(g.party)}`.trim() : description,
+      description: g.party ? `${description} — ${partyTitle(g.party)}`.trim() : description,
     });
   }
   return lines;

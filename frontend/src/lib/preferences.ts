@@ -51,10 +51,6 @@ export function getPreference<K extends keyof UserPreferences>(key: K): UserPref
   return cache[key];
 }
 
-export function getPreferences(): UserPreferences {
-  return cache;
-}
-
 /** بلافاصله کش محلی را به‌روز می‌کند (خواننده‌های همزمان بعد از این صدا زدن، مقدار تازه را می‌بینند)
  * سپس در پس‌زمینه با بک‌اند هماهنگ می‌شود. */
 export async function savePreferences(patch: Partial<UserPreferences>): Promise<UserPreferences> {

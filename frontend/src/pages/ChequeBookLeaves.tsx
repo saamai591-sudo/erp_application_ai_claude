@@ -15,6 +15,7 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
+import { PlusIcon, VoidIcon } from "../components/icons";
 
 // «دسته چک» — طبق Documents/دسته چک.md. هر رکورد یک برگه‌ی چک پرداختنی مجزاست (نه کل دسته)؛ فقط
 // حساب‌های بانکیِ نوعِ «دارای دسته چک» (BankAccountTypes.tsx) قابل انتخابند. وضعیت (خام/صادر شده/باطل
@@ -129,23 +130,6 @@ function ChequeBookLeafList() {
         />
       )}
     </div>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function VoidIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M6 6l12 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
   );
 }
 

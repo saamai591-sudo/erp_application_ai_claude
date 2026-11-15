@@ -17,6 +17,7 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { WarehouseGroup } from "./WarehouseGroups";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 interface PartyOption {
   id: number;
@@ -25,10 +26,6 @@ interface PartyOption {
   isActive: boolean;
   firstName: string | null;
   lastName: string | null;
-}
-
-function partyDisplayName(p: PartyOption): string {
-  return `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
 interface Warehouse {
@@ -61,7 +58,6 @@ function WarehouseList() {
   const cacheKey = "/warehouses";
   const [items, setItems] = usePersistedState<Warehouse[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/warehouses").then(setItems).catch((e) => setError(e.message));

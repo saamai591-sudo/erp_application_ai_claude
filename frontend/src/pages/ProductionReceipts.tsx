@@ -23,6 +23,8 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { CostCenterPickerField } from "../components/TypePickerFields";
+import { PlusIcon } from "../components/icons";
+import { recomputeAmount } from "../lib/rowHelpers";
 
 // «رسید تولید» — طبق stockAnalysis.md بند ۳۴/۴۲ («دریافت محصول»)؛ این پروژه ماژول «تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» و بدون طرف‌حساب است (نگاه کنید به یادداشت بالای
@@ -57,11 +59,13 @@ interface GoodsItemRow {
 interface CostCenterOption { id: number; detailCode: string; title: string; isActive?: boolean }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; costCenterId: number | null; costCenterTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
-interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost?: number; amount?: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null; details?: DetailValueDto[] }
-interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; costCenterId: number | null; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
+interface DetailLine { id: number; sourceProductionStatLineId?: number | null; statNumber?: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost?: number; amount?: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null; details?: DetailValueDto[] }
+interface Detail { id: number; number: number; date: string; basis?: "NO_BASIS" | "PRODUCTION_STAT"; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; costCenterId: number | null; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید حسابداری شده" };
-const INFO_TEXT = "ثبت رسید تولید (ورود محصول/نیمه‌ساخته‌ی تولیدشده به انبار) — برای تخصیص بهای تمام‌شده، این سند یک مرکز هزینه الزامی دارد. این سند همیشه بدون مبنا و بدون طرف‌حساب است.";
+const INFO_TEXT = "ثبت رسید تولید (ورود محصول/نیمه‌ساخته‌ی تولیدشده به انبار) — این سند یک مرکز هزینه الزامی دارد. مبنای «آمار تولید»: ردیف‌ها از آمار تولید همان مرکز انتخاب می‌شوند و مقدارشان بیش از مانده‌ی آمار نمی‌شود (با لایسنس بهای تمام‌شده این مبنا الزامی است)؛ «بدون مبنا» فقط برای نصب‌های بدون محاسبه‌ی بهای تمام‌شده است.";
+const BASIS_FA: Record<string, string> = { PRODUCTION_STAT: "بر مبنای آمار تولید", NO_BASIS: "بدون مبنا" };
+interface StatPick { id: number; lineId: number; batchId?: number | null; batchNumber?: string | null; statNumber: number; statDate: string; goodsItemId: number; itemCode: string; itemTitle: string; unit: string; quantity: number; remaining: number }
 
 export default function ProductionReceipts() {
   const location = useLocation();
@@ -72,10 +76,6 @@ export default function ProductionReceipts() {
   if (isNew) return <ProductionReceiptForm basePath={basePath} />;
   if (isEdit) return <ProductionReceiptForm basePath={basePath} editId={Number(id)} />;
   return <ProductionReceiptList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function ProductionReceiptList({ basePath }: { basePath: string }) {
@@ -159,14 +159,16 @@ function ProductionReceiptList({ basePath }: { basePath: string }) {
   );
 }
 
-interface RowState { goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: string; amount: string; description: string; serialIds: string[]; batchAllocations: { batchId: string; quantity: string }[]; physicalLocation: string; details?: DetailValues }
+interface RowState { statLineId: string; statNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: string; amount: string; description: string; serialIds: string[]; batchAllocations: { batchId: string; quantity: string }[]; physicalLocation: string; details?: DetailValues; /** بچ از ردیف آمار تولید آمده و قابل تغییر نیست */ batchLocked?: boolean }
 
 function emptyRow(): RowState {
-  return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitCost: "", amount: "", description: "", serialIds: [], batchAllocations: [], physicalLocation: "" };
+  return { statLineId: "", statNumber: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitCost: "", amount: "", description: "", serialIds: [], batchAllocations: [], physicalLocation: "" };
 }
 
 function mapRows(d: Detail): RowState[] {
   return d.lines.map((l) => ({
+    statLineId: l.sourceProductionStatLineId ? String(l.sourceProductionStatLineId) : "",
+    statNumber: l.statNumber ? String(l.statNumber) : "",
     goodsItemId: String(l.goodsItemId),
     goodsItemCode: l.goodsItemCode,
     goodsItemTitle: l.goodsItemTitle,
@@ -180,20 +182,12 @@ function mapRows(d: Detail): RowState[] {
     batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
     physicalLocation: l.physicalLocation || "",
     details: detailsToValues(l.details),
+    batchLocked: !!l.sourceProductionStatLineId && l.batchAllocations.length === 1,
   }));
 }
 
 // طبق بند ۳-۴ «مستند عمومی عملیات انبار»: مبلغ باید بر اساس تعداد ارقام اعشار «ارز پایه» گرد شود، نه
 // یک عدد هاردکد. این تابع فقط برای پیش‌نمایش لحظه‌ای در فرانت‌اند است؛ مرجع نهایی محاسبه، بک‌اند است.
-function recomputeAmount(row: RowState, baseDecimalPlaces: number): RowState {
-  const qty = Number(row.quantity) || 0;
-  const cost = Number(row.unitCost) || 0;
-  if (!qty) return { ...row, amount: "" };
-  const factor = Math.pow(10, baseDecimalPlaces);
-  const amount = Math.round(qty * cost * factor) / factor;
-  return { ...row, amount: amount ? String(amount) : "" };
-}
-
 function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath: string }) {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
@@ -206,16 +200,16 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
 
   const detailConfig = useDocDetailConfig("PRODUCTION_RECEIPT");
-  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, flash, submit, remove } = useDocumentForm<
-    { date: string; warehouseId: string; costCenterId: string; description: string; details: DetailValues },
+  const { header, setHeader, rows, setRows, meta, setMeta, error, setError, loaded, flash, submit, remove } = useDocumentForm<
+    { date: string; warehouseId: string; costCenterId: string; basis: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "production-receipts",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", costCenterId: "", description: "", details: {} }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", costCenterId: "", basis: "PRODUCTION_STAT", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), costCenterId: d.costCenterId ? String(d.costCenterId) : "", description: d.description || "", details: detailsToValues(d.details) }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), costCenterId: d.costCenterId ? String(d.costCenterId) : "", basis: d.basis === "PRODUCTION_STAT" ? "PRODUCTION_STAT" : "NO_BASIS", description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: mapRows,
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
@@ -253,7 +247,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
   }
 
   function onQuantityChange(idx: number, quantity: string) {
-    setRows((prev) => prev.map((r, i) => (i === idx ? recomputeAmount({ ...r, quantity }, baseDecimalPlaces) : r)));
+    setRows((prev) => prev.map((r, i) => (i === idx ? recomputeAmount({ ...r, quantity, ...(r.batchLocked && r.batchAllocations.length === 1 ? { batchAllocations: [{ ...r.batchAllocations[0], quantity }] } : {}) }, baseDecimalPlaces) : r)));
   }
   function onUnitCostChange(idx: number, unitCost: string) {
     setRows((prev) => prev.map((r, i) => (i === idx ? recomputeAmount({ ...r, unitCost }, baseDecimalPlaces) : r)));
@@ -266,6 +260,48 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
     setRows((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  const statBasis = header.basis === "PRODUCTION_STAT";
+  // ردیف‌های آمارِ دارای مانده‌ی همان مرکز (تا تاریخ سند) — منبع انتخابگر ردیفِ مبنا در هر ردیف
+  const [pickableStat, setPickableStat] = useState<StatPick[]>([]);
+  useEffect(() => {
+    if (!statBasis || !header.costCenterId || !header.date) return setPickableStat([]);
+    const q = new URLSearchParams({ costCenterId: header.costCenterId, date: header.date });
+    if (editId) q.set("receiptDocId", String(editId));
+    api.get(`/production-stats/pickable-lines?${q.toString()}`)
+      .then((lines: any[]) => setPickableStat(lines.map((l) => ({ ...l, id: l.lineId }))))
+      .catch(() => setPickableStat([]));
+  }, [statBasis, header.costCenterId, header.date, editId]);
+
+  // مانده‌ی زنده: مقدارِ سایر ردیف‌های همین سند که به همان ردیف آمار وصل‌اند کم می‌شود
+  function liveRemaining(s: StatPick, exceptIdx: number) {
+    const other = rows.reduce((sum, r, i) => (i !== exceptIdx && r.statLineId === String(s.lineId) ? sum + (Number(r.quantity) || 0) : sum), 0);
+    return Math.max(0, Math.round((s.remaining - other) * 1e6) / 1e6);
+  }
+  function availableStatLines(idx: number) {
+    return pickableStat.map((s) => ({ ...s, remaining: liveRemaining(s, idx) })).filter((s) => s.remaining > 0);
+  }
+  function rowFromStat(s: StatPick) {
+    const item = goodsItems.find((g) => g.id === s.goodsItemId);
+    return recomputeAmount({ ...emptyRow(), statLineId: String(s.lineId), statNumber: String(s.statNumber), goodsItemId: String(s.goodsItemId), unitId: item ? String(item.mainUnitId) : "", quantity: String(s.remaining), details: newRowDetails(detailConfig, header.details), ...(s.batchId ? { batchAllocations: [{ batchId: String(s.batchId), quantity: String(s.remaining) }], batchLocked: true } : {}) }, baseDecimalPlaces);
+  }
+  // انتخاب چندتایی: اولین مورد در همین ردیف، بقیه ردیف‌های جدید بعد از آن
+  function onStatLinesPicked(idx: number, picked: StatPick[]) {
+    if (!picked.length) return;
+    setRows((prev) => {
+      const [first, ...rest] = picked;
+      const next = prev.slice();
+      next[idx] = rowFromStat(first);
+      next.splice(idx + 1, 0, ...rest.map(rowFromStat));
+      return next;
+    });
+  }
+  function changeBasis(basis: string) {
+    if (basis === header.basis) return;
+    if (rows.some((r) => r.goodsItemId) && !window.confirm("با تغییر مبنا ردیف‌های فعلی پاک می‌شوند. ادامه می‌دهید؟")) return;
+    setHeader({ ...header, basis });
+    setRows([emptyRow()]);
+  }
+
   const totalQuantity = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
@@ -275,9 +311,11 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
       date: header.date,
       warehouseId: Number(header.warehouseId),
       costCenterId: header.costCenterId ? Number(header.costCenterId) : null,
+      basis: header.basis,
       description: header.description,
       details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        sourceProductionStatLineId: header.basis === "PRODUCTION_STAT" && r.statLineId ? Number(r.statLineId) : null,
         details: valuesToPayload(r.details),
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: Number(r.unitId),
@@ -301,6 +339,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
         for (const [i, l] of body.lines.entries()) {
           if (!l.goodsItemId) return `کالا برای ردیف ${i + 1} الزامی است`;
           if (!(l.quantity > 0)) return `مقدار ردیف ${i + 1} باید عددی مثبت باشد`;
+          if (header.basis === "PRODUCTION_STAT" && !l.sourceProductionStatLineId) return `ردیف ${i + 1}: ردیف آمار تولید انتخاب نشده است`;
         }
         return null;
       },
@@ -405,6 +444,12 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
               <label>مرکز هزینه<RequiredMark /></label>
               <CostCenterPickerField costCenters={costCenters} value={header.costCenterId} onChange={(id) => setHeader({ ...header, costCenterId: id })} disabled={coreDisabled} />
             </div>
+            <div className="form-field">
+              <label>مبنا<RequiredMark /></label>
+              <select value={header.basis} onChange={(e) => changeBasis(e.target.value)} disabled={coreDisabled}>
+                {Object.entries(BASIS_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
             <DocDetailHeaderFields
               config={detailConfig}
               values={header.details}
@@ -441,6 +486,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
               <thead>
                 <tr>
                   <th>ردیف</th>
+                  {statBasis && <th>آمار</th>}
                   <th>کالا</th>
                   <th>واحد</th>
                   <th>ردیابی</th>
@@ -460,18 +506,41 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
+                      {statBasis && (
+                        <td style={{ minWidth: 90 }}>
+                          <RecordPickerField<StatPick>
+                            title="انتخاب ردیف آمار تولید"
+                            disabled={coreDisabled}
+                            displayValue={row.statNumber ? toFaDigits(row.statNumber) : ""}
+                            rows={availableStatLines(idx)}
+                            columns={[
+                              { header: "آمار", render: (x) => toFaDigits(String(x.statNumber)), filterValue: (x) => String(x.statNumber), width: "70px" },
+                              { header: "تاریخ", render: (x) => formatJalaliDate(x.statDate), filterValue: (x) => formatJalaliDate(x.statDate), width: "110px" },
+                              { header: "کالا", render: (x) => x.itemTitle, filterValue: (x) => x.itemTitle },
+                              { header: "مانده", render: (x) => toFaDigits(String(x.remaining)), filterValue: (x) => String(x.remaining), width: "90px" },
+                            ]}
+                            multiSelect
+                            onSelectMultiple={(ls) => onStatLinesPicked(idx, ls)}
+                            onSelect={(x) => onStatLinesPicked(idx, [x])}
+                          />
+                        </td>
+                      )}
                       <td style={{ minWidth: 200 }}>
-                        <RecordPickerField
-                          title="انتخاب کالا"
-                          disabled={coreDisabled}
-                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                          rows={pickerRows}
-                          columns={[
-                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                          ]}
-                          onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                        />
+                        {statBasis ? (
+                          <span>{row.goodsItemTitle || item ? `${toFaDigits(item?.fullCode ?? row.goodsItemCode)} — ${item?.title ?? row.goodsItemTitle}` : "—"}</span>
+                        ) : (
+                          <RecordPickerField
+                            title="انتخاب کالا"
+                            disabled={coreDisabled}
+                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
+                            rows={pickerRows}
+                            columns={[
+                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
+                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
+                            ]}
+                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
+                          />
+                        )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
                       <TrackingCells
@@ -482,7 +551,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
                         quantity={Number(row.quantity) || 0}
                         value={row}
                         onChange={(patch) => updateRow(idx, patch)}
-                        disabled={coreDisabled}
+                        disabled={coreDisabled || !!row.batchLocked}
                       />
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal placeholder="۰" disabled={coreDisabled} />

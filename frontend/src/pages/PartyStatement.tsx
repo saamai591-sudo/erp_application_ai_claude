@@ -7,12 +7,13 @@ import { PartyContactButton } from "../components/PartyContactButton";
 import { RefreshButton } from "../components/RefreshButton";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
-import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
+import { toFaDigits } from "../lib/formatAmount";
 import { formatDisplayDate } from "../lib/formatDate";
 import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefaultDate";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { usePersistedState } from "../lib/usePersistedState";
 import { api } from "../lib/api";
+import { SignedCell } from "../components/reviewColumns";
 
 // «صورتحساب مشتری» (فروش › گزارش)، «صورتحساب تامین‌کننده» (زنجیره تامین › گزارش) و «صورتحساب طرف‌حساب» (حسابداری › گزارش؛ جامع = هر دو نقش) —
 // ریز گردش یک طرف‌حساب در یک ارز (انتخاب ارز اجباری است؛ برای یک طرف‌حساب چند ارز هم‌زمان در یک صورتحساب نمی‌آید).
@@ -67,11 +68,6 @@ const DOC_PATH: Record<string, string> = {
   CHEQUE_CLEARING_RECEIVABLE: "/cheque-clearings-receivable",
   CHEQUE_CLEARING_PAYABLE: "/cheque-clearings-payable",
 };
-
-function SignedCell({ value }: { value: number }) {
-  const negative = value < 0;
-  return <span className={negative ? "olap-amount-negative" : undefined}>{negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value)}</span>;
-}
 
 export default function PartyStatement({ scope }: { scope: Scope }) {
   const cfg = CONFIG[scope];

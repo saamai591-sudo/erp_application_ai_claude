@@ -1,0 +1,6 @@
+node_modules/
+agent.config.json
+agent.state.json
+agent.log
+agent.log.old
+dist/

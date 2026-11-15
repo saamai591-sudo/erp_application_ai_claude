@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
-import { parseFilters, stringWhere, numberWhere, dateWhere, matchesFilterValue, parseSorts, applyServerFilterSort, ServerColumnDef } from "../utils/tableFilters";
+import { parseFilters, stringWhere, numberWhere, dateWhere, parseSorts, applyServerFilterSort, ServerColumnDef } from "../utils/tableFilters";
 import { toJalaliYearMonth } from "../utils/jalaliDate";
 import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";

@@ -11,11 +11,10 @@ import { KIND_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/pa
 import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
 import { useCalcTypes } from "../lib/useCalcTypes";
 import { WorkMonthPicker } from "../components/WorkMonthPicker";
+import { DECREE_TYPE_FA } from "../lib/enumLabels";
 
 // حقوق و دستمزد › محاسبه حقوق (عملیات) و گزارش محاسبات حقوق (گزارش): یک کارمند و یک ماه شمسی را انتخاب می‌کنید؛ محاسبه (فقط در حالت عملیات)
 // فیش را می‌سازد و گزارش، ریز ورودی‌ها و محاسبه‌ی تک‌تک عوامل (شرط، فرمول، مقدار عملوندها، نتیجه) را نشان می‌دهد.
-
-const DECREE_TYPE_FA: Record<string, string> = { HIRE: "استخدام", RENEWAL: "تمدید", ANNUAL_RAISE: "افزایش سالانه", PROMOTION: "ارتقا / تغییر پست", AMENDMENT: "اصلاحی" };
 
 interface EmpOpt {
   id: number;

@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { Modal } from "./Modal";
+import { toFaDigits } from "../lib/formatAmount";
 
 export function AdvancedFilterDialog({
   title = "فیلترهای بیشتر",
@@ -42,11 +43,6 @@ function FilterIcon() {
       <path d="M4 5h16l-6 8v6l-4-2v-4L4 5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
     </svg>
   );
-}
-
-const FA_DIGITS = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
-function toFaDigits(value: string): string {
-  return value.replace(/[0-9]/g, (d) => FA_DIGITS[Number(d)]);
 }
 
 export function AdvancedFilterButton({ count, onClick }: { count: number; onClick: () => void }) {

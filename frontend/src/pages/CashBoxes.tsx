@@ -28,8 +28,7 @@ export default function CashBoxes() {
 }
 
 function CashBoxList() {
-  const { items, loading, error, remove, reload, create } = useCrud<CashBox>("/cash-boxes");
-  const navigate = useNavigate();
+  const { items, loading, error, remove, reload } = useCrud<CashBox>("/cash-boxes");
   return (
     <div>
       <div className="page-header">

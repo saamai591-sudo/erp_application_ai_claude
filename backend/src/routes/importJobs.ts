@@ -36,6 +36,7 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
   "inventory-counting-shortage": `${findFormPrefix("inventory-counting-shortages")}.create`,
   "sales-quote": `${findFormPrefix("sales-quotes")}.create`,
   "sales-price-list": `${findFormPrefix("sales-price-lists")}.edit`,
+  "store-sale": `${findFormPrefix("store-sales")}.create`,
   "payroll-component": `${findFormPrefix("payroll-components")}.create`,
   employee: `${findFormPrefix("employees")}.create`,
   "employment-decree": `${findFormPrefix("employment-decrees")}.create`,
@@ -45,6 +46,7 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
   "party-balance-opening-customer": `${findFormPrefix("customer-balance-openings")}.create`,
   "party-balance-opening-supplier": `${findFormPrefix("supplier-balance-openings")}.create`,
   "attendance-leave-balance": `${findFormPrefix("attendance-leave-balance-entries")}.create`,
+  "attendance-device-mapping": `${findFormPrefix("attendance-device-mappings")}.create`,
 };
 
 const router = Router();

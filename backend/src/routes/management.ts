@@ -1,6 +1,4 @@
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
 import { NextFunction, Request, Response, Router } from "express";
 import jwt from "jsonwebtoken";
 import { collectFingerprint } from "../license/fingerprint";
@@ -17,6 +15,7 @@ import {
   storeLicenseText,
   validateIncomingLicense,
 } from "../license/licenseService";
+import { getAppVersion } from "../lib/appVersion";
 
 // «مدیریت» (/management در فرانت‌اند): صفحه‌ی جدا از ورود ERP، برای فعال‌سازی و دیدن وضعیت لایسنس. هیچ‌کدام از مسیرها به کاربران ERP و
 // مجوزهایشان وابسته نیست (قبل از requireAuth ثبت می‌شود، نگاه کنید به index.ts).
@@ -80,14 +79,6 @@ function xml(v: string): string {
   return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function appVersion(): string {
-  try {
-    return JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "..", "package.json"), "utf8")).version || "";
-  } catch {
-    return "";
-  }
-}
-
 async function isActivated(): Promise<boolean> {
   const s = await evaluateLicense();
   return ACTIVATED_STATES.includes(s.state);
@@ -117,7 +108,7 @@ router.get("/management/request", async (req, res) => {
   const body = `<?xml version="1.0" encoding="utf-8"?>
 <ServerInfo>
   <Product>accounting-erp</Product>
-  <Version>${xml(appVersion())}</Version>
+  <Version>${xml(getAppVersion())}</Version>
   <InstallID>${xml(installId)}</InstallID>
   <DatabaseName>${xml(fp.databaseName)}</DatabaseName>
   <DatabaseSystemID>${xml(fp.databaseSystemId)}</DatabaseSystemID>

@@ -6,10 +6,12 @@ import { api } from "../lib/api";
 import { formatAmountFa } from "../lib/formatAmount";
 import { formatDisplayDate } from "../lib/formatDate";
 import { useTabs } from "../lib/TabsContext";
+import { useModuleEnabled } from "../lib/useEntitlements";
 
-// «آنالیز موجودی» (وضعیت فعلی، سطح کالا): موجودی واقعی، در راه (مانده‌ی سفارش خرید تاییدشده)، تعهدشده (مانده‌ی حواله‌نشده‌ی سفارش فروش
-// تاییدشده) و در دسترس = موجودی + در راه − تعهدشده. قواعد در backend/src/services/stockAnalysisService.ts؛ فقط نمایش، بدون کنترل سخت.
-// سلول‌های «در راه» و «تعهدشده» لینک‌اند: کلیک، ریز سفارش‌های مبنا را در مودال نشان می‌دهد (با امکان بازکردن سفارش).
+// «آنالیز موجودی» (وضعیت فعلی، سطح کالا): موجودی واقعی، در راه (مانده‌ی سفارش خرید تاییدشده)، در حال تولید (مانده‌ی دستورهای تولید صادرشده)،
+// تعهدشده (مانده‌ی حواله‌نشده‌ی سفارش فروش تاییدشده) و در دسترس = موجودی + در راه + در حال تولید − تعهدشده.
+// قواعد در backend/src/services/stockAnalysisService.ts؛ فقط نمایش، بدون کنترل سخت.
+// سلول‌های «در راه»، «در حال تولید» و «تعهدشده» لینک‌اند: کلیک، ریز سفارش‌های مبنا را در مودال نشان می‌دهد (با امکان بازکردن سفارش).
 
 interface Row {
   id: number;
@@ -18,11 +20,12 @@ interface Row {
   unit: string;
   stock: number;
   inTransit: number;
+  inProduction: number;
   committed: number;
   available: number;
 }
 
-type Kind = "committed" | "in-transit";
+type Kind = "committed" | "in-transit" | "in-production";
 
 interface OrdersDetail {
   item: { code: string; title: string; unit: string };
@@ -36,6 +39,7 @@ const num = (n: number) => (n < 0 ? `(${formatAmountFa(Math.abs(n))})` : formatA
 const KIND_TEXT: Record<Kind, { title: string; party: string; path: string; orderLabel: string }> = {
   committed: { title: "سفارش‌های فروش مبنای مقدار تعهدشده", party: "مشتری", path: "/sales-orders", orderLabel: "سفارش فروش" },
   "in-transit": { title: "سفارش‌های خرید مبنای موجودی در راه", party: "تامین‌کننده", path: "/purchase-orders", orderLabel: "سفارش خرید" },
+  "in-production": { title: "دستورهای تولید مبنای مقدار در حال تولید", party: "نوع دستور", path: "/production-orders", orderLabel: "دستور تولید" },
 };
 
 export default function StockAnalysis() {
@@ -44,6 +48,7 @@ export default function StockAnalysis() {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<OrdersDetail | null>(null);
   const { openTab } = useTabs();
+  const productionOn = useModuleEnabled("production");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -113,7 +118,7 @@ export default function StockAnalysis() {
         <button type="button" className="btn secondary" onClick={load} disabled={loading}>
           {loading ? "در حال بارگذاری…" : "به‌روزرسانی"}
         </button>
-        <span style={{ fontSize: 12, opacity: 0.7 }}>وضعیت فعلی همه‌ی انبارها — در دسترس = موجودی + در راه − تعهدشده</span>
+        <span style={{ fontSize: 12, opacity: 0.7 }}>وضعیت فعلی همه‌ی انبارها — در دسترس = موجودی + در راه{productionOn ? " + در حال تولید" : ""} − تعهدشده</span>
       </div>
       <ErrorToast message={error} />
       <DataTable<Row>
@@ -124,6 +129,7 @@ export default function StockAnalysis() {
             { header: "واحد سنجش", render: (r: Row) => r.unit, filterType: "string", filterValue: (r: Row) => r.unit, width: "100px" },
             numCol("موجودی", (r) => r.stock),
             linkCol("موجودی در راه", (r) => r.inTransit, "in-transit"),
+            ...(productionOn ? [linkCol("در حال تولید", (r) => r.inProduction, "in-production")] : []),
             linkCol("مقدار تعهدشده", (r) => r.committed, "committed"),
             numCol("موجودی در دسترس", (r) => r.available),
           ] as any

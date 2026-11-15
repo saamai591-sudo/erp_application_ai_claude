@@ -809,7 +809,7 @@ const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
  * ارقام «متنِ» سند HTML را فارسی می‌کند (تگ‌ها/صفت‌ها، <style>، <script> و موجودیت‌هایی مثل &#39; و داده‌ی base64 تصویر دست‌نخورده می‌مانند):
  * 0-9 → ۰-۹، «,» بین ارقام → «٬» (جداکننده‌ی هزارگان) و «.» بین ارقام → «٫» (ممیز).
  */
-export function toPersianDigitsInHtml(html: string): string {
+function toPersianDigitsInHtml(html: string): string {
   return html.replace(/(<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>|<[^>]*>)|([^<]+)/gi, (_m, markup: string | undefined, text: string | undefined) => {
     if (markup !== undefined) return markup;
     return (text ?? "")
@@ -825,7 +825,7 @@ function escapeHtml(s: string): string {
 }
 
 /** نام فایل امن از الگوی Handlebars: نویسه‌های ممنوع نام فایل و کنترلی حذف، فاصله‌ها فشرده، حداکثر ۱۲۰ نویسه */
-export function buildPrintFileName(pattern: string, data: PrintData, fallback: string): string {
+function buildPrintFileName(pattern: string, data: PrintData, fallback: string): string {
   let name = "";
   try {
     name = hb.compile(pattern || fallback, { noEscape: true })(data);

@@ -2,12 +2,15 @@ import { randomInt } from "crypto";
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
 import { nextSerialNumber } from "../utils/coding";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveCurrentYearFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { displayDate } from "../utils/dateDisplay";
 import { issueJournalEntry } from "./journalEntryService";
 import { findIssuingDocType } from "./documentTypeService";
 import { EffectiveTreasurySettings } from "./treasurySettingService";
 import { resolveAccountDetailFieldsForCodes } from "../utils/detailValues";
+import { getBaseCurrencyDecimals } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
+import { parseDateOnlyUtc } from "../utils/inputParse";
 
 // باشگاه مشتریان › «بن‌کارت» (بنِ صادرشده توسط خودمان) — تنها محل قواعد.
 // • چرخه‌ی عمر هر بن: CREATED (ایجادشده؛ بدهی نیست) → SOLD (فروخته‌شده به سازمان؛ بدهی ما) → USED (مصرف‌شده در یک دریافت فروش فروشگاهی)؛ VOID = باطل.
@@ -21,25 +24,9 @@ export class VoucherError extends Error {}
 const EPS = 1e-6;
 const dayStr = (d: Date) => d.toISOString().slice(0, 10);
 const userId = () => getRequestContext()?.userId ?? null;
-const partyTitle = (p: any) => (p ? p.detailTitle || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.name || "" : "");
+const parseDate = (raw: unknown, label: string): Date => parseDateOnlyUtc(raw, label, (m) => new VoucherError(m));
 
-function parseDate(raw: unknown, label: string): Date {
-  const d = new Date(String(raw ?? ""));
-  if (!raw || Number.isNaN(d.getTime())) throw new VoucherError(`${label} الزامی و باید معتبر باشد`);
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-async function fiscalPeriodOf(date: Date) {
-  const fp = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fp) throw new VoucherError("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fp.id);
-  return fp;
-}
-
-async function baseDecimals() {
-  const c = await prisma.currency.findFirst({ where: { isBase: true } });
-  return c?.decimalPlaces ?? 0;
-}
+const fiscalPeriodOf = (date: Date) => resolveCurrentYearFiscalPeriod(date, (m) => new VoucherError(m));
 
 // ───────────────────────── سریال ─────────────────────────
 
@@ -56,7 +43,6 @@ function luhnDigit(body: string): number {
   }
   return (10 - (sum % 10)) % 10;
 }
-export const serialIsValid = (s: string) => /^\d{11}$/.test(s) && luhnDigit(s.slice(0, 10)) === Number(s[10]);
 function newSerial(): string {
   const body = String(randomInt(0, 10_000_000_000)).padStart(10, "0");
   return body + luhnDigit(body);
@@ -83,7 +69,7 @@ async function cleanType(b: VoucherTypeBody, existingId?: number) {
   if (!title) throw new VoucherError("عنوان نوع بن الزامی است");
   const faceValue = Number(String(b.faceValue ?? "").replace(/,/g, ""));
   if (!Number.isFinite(faceValue) || faceValue <= 0) throw new VoucherError("ارزش اسمی باید عددی بزرگ‌تر از صفر باشد");
-  const dp = await baseDecimals();
+  const dp = await getBaseCurrencyDecimals();
   if (Math.abs(faceValue * 10 ** dp - Math.round(faceValue * 10 ** dp)) > 1e-6) throw new VoucherError(`ارزش اسمی حداکثر ${dp} رقم اعشار دارد`);
   let validityDays: number | null = null;
   if (b.validityDays !== undefined && b.validityDays !== null && String(b.validityDays).trim() !== "") {
@@ -207,7 +193,7 @@ export async function listVoucherBatches() {
 
 const STATUS_FA = { CREATED: "ایجادشده", SOLD: "فروخته‌شده", USED: "مصرف‌شده", VOID: "باطل" } as const;
 
-export function voucherShape(v: any, today = new Date()) {
+function voucherShape(v: any, today = new Date()) {
   const expired = !!v.validUntil && v.validUntil.getTime() < Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) && (v.status === "CREATED" || v.status === "SOLD");
   return {
     id: v.id,
@@ -307,7 +293,7 @@ export async function deleteVoucherSale(id: number) {
   });
 }
 
-export function voucherSaleShape(s: any) {
+function voucherSaleShape(s: any) {
   const vs: any[] = s.vouchers ?? [];
   return {
     id: s.id,

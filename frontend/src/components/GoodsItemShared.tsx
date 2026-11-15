@@ -16,7 +16,7 @@ import { ExcelImportButton } from "./ExcelImport";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
-import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
+import { toFaDigits } from "../lib/formatAmount";
 import { digitsOnly } from "../lib/digits";
 
 export type ItemKind = "GOODS" | "SERVICE";
@@ -121,18 +121,6 @@ function groupChain(group: GroupRow, all: GroupRow[]): GroupRow[] {
     cur = cur.parentId ? all.find((x) => x.id === cur!.parentId) : undefined;
   }
   return chain;
-}
-
-function fullGroupCode(group: GroupRow, all: GroupRow[]): string {
-  return groupChain(group, all)
-    .map((g) => g.code)
-    .join("");
-}
-
-function groupBreadcrumb(group: GroupRow, all: GroupRow[]): string {
-  return groupChain(group, all)
-    .map((g) => g.title)
-    .join(" › ");
 }
 
 interface AttrRowState {
@@ -417,7 +405,6 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
   const selectedAccountingGroup = accountingGroups.find((a) => String(a.id) === form.accountingGroupId);
   // فقط گروه‌هایی که نوع ریشه‌شان با این فرم (کالا ⇄ PRODUCT، خدمت ⇄ SERVICE) یکی است
   const wantedGroupType = kind === "GOODS" ? "PRODUCT" : "SERVICE";
-  const leafGroups = groups.filter((g) => g.isLastBranch && g.isActive && (!g.rootGroupType || g.rootGroupType === wantedGroupType));
   const showWeightFields = kind === "GOODS" && selectedUnit && !selectedUnit.isWeight;
   const { codePreview, titlePreview } = computePreview(selectedGroup, groups, attrRows, form.code, form.title);
 

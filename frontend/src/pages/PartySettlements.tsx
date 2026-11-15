@@ -18,13 +18,15 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
-import { partyDisplayName } from "./Users";
+
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
 import { DescriptionField } from "../components/DescriptionField";
 import { TreasuryAccountingPanel } from "../components/TreasuryAccountingPanel";
 import { PaymentBasisPicker, usePaymentBasisCandidates, BasisCandidate as PayBasis, basisKeyOf, rowBasisKey, basisFieldPatch, basisDisplayOf } from "../components/PaymentBasisPicker";
 import { usePermissions } from "../lib/usePermissions";
+import { CheckIcon, UndoIcon, PlusIcon, EyeIcon } from "../components/icons";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 // «اعلامیه بدهکار بستانکار» (مدیریت خزانه › دریافت): تسویه بین طرف‌حساب‌ها بدون ابزار — مثلاً مشتری وجه فاکتور خود را از طرف ما به حساب تامین‌کننده می‌ریزد.
 // بالا «موضوعات دریافت» (بستانکار)، پایین «موضوعات پرداخت» (بدهکار) که هرکدام از یک ردیف دریافت «لود» می‌شوند؛ جمع ریالی ردیف‌های پرداختِ هر ردیف دریافت
@@ -116,37 +118,6 @@ function statusLabel(accountingStatus?: AccountingStatus, hasJournal?: boolean) 
   if (hasJournal) return "سند صادر شده";
   if (accountingStatus === "APPROVED") return "تایید حسابداری";
   return "ثبت";
-}
-
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function EyeIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
 }
 
 const INFO =

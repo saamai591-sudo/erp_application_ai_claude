@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
-import { showToast } from "../lib/toast";
 import { FONT_OPTIONS, applyFont, THEME_OPTIONS, applyTheme } from "../lib/userSettings";
 import { loadPreferences, savePreferences } from "../lib/preferences";
 
 export function UserSettingsModal({ onClose }: { onClose: () => void }) {
   const [fontKey, setFontKey] = useState("vazirmatn");
   const [themeKey, setThemeKey] = useState("default");
-  const [saved, setSaved] = useState(false);
+  const [, setSaved] = useState(false);
 
   useEffect(() => {
     loadPreferences().then((p) => {

@@ -7,6 +7,7 @@ import { FormPage } from "../components/FormPage";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
@@ -35,14 +36,14 @@ import { localTodayIso } from "../lib/formatDate";
 import { isTabDirty, currentTabPath } from "../lib/unsavedChanges";
 import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
 import { StoreCardReceiptDialog, ExistingReceiptsTable, ExistingReceipt, ReceiptPayee } from "../components/StoreCardReceiptDialog";
+import { partyTitleOf } from "../lib/partyDisplay";
+import { toEnglishDigits } from "../lib/digits";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»: اول تاریخ و ایستگاه انتخاب می‌شود؛ ردیف‌ها با بارکدخوان (فیلد بارکد کالا) یا جست‌وجو اضافه می‌شوند، مقدار پیش‌فرض ۱ و قابل‌تغییر است.
 // فی از «اعلامیه قیمت فروش» با حوزه‌ی همان ایستگاه خوانده می‌شود (پله‌ی مقدار هم)؛ کالای بدون فی در آن اعلامیه اصلاً قابل انتخاب نیست. فی فقط با مجوز «تغییر فی» قابل تغییر است.
 // سند حسابداری و حواله انبار ندارد؛ تا وقتی «تحویل‌نشده» است تعدادش از موجودی گزارش‌ها کم می‌شود. قواعد نهایی در سرور (services/storeSaleService.ts).
 
 /** ارقام فارسی/عربی → لاتین (بارکدخوان و تایپ دستی یکسان جست‌وجو شوند) */
-const normDigits = (v: string) => v.replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
-
 interface StationCardReader {
   id: number;
   code: number;
@@ -183,7 +184,6 @@ interface Row {
 
 const DELIVERY_FA = { NOT_DELIVERED: "تحویل‌نشده", DELIVERED: "تحویل‌شده" } as const;
 const PAYMENT_FA = { UNPAID: "پرداخت‌نشده", PARTIAL: "جزئی", PAID: "تسویه" } as const;
-const customerTitleOf = (c: CustomerOpt) => c.party.detailTitle || (c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim());
 const roundTo = (v: number, dp: number) => Math.round(v * 10 ** dp) / 10 ** dp;
 const qtyOf = (r: Row) => Number(r.quantity) || 0;
 
@@ -222,6 +222,25 @@ function SaleList() {
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint title="فروش فروشگاهی" text="فروش سریع یک ایستگاه فروش با بارکدخوان؛ فی از اعلامیه‌ی قیمتِ ایستگاه می‌آید. این سند سند حسابداری و حواله انبار ندارد؛ تا قبل از «تحویل»، تعدادش از موجودی گزارش‌ها کم می‌شود." />
           <NewRecordButton path="/store-sales/new" />
+          <ExcelImportButton
+            entityLabel="فروش فروشگاهی"
+            templateFilename="قالب-فروش-فروشگاهی"
+            backendEntityType="store-sale"
+            columns={[
+              { key: "invoiceKey", label: "کلید فاکتور", required: true, hint: "هر متن یا عددی که ردیف‌های یک فروش را (همراه با تاریخ) به هم وصل می‌کند؛ شماره‌ی فروش خودکار تعیین می‌شود" },
+              { key: "date", label: "تاریخ فاکتور", required: true, hint: "شمسی (مثلاً 1405/05/06) یا میلادی؛ باید داخل دوره‌ی مالی جاری و نه قبل از آخرین «تحویل فروش» ایستگاه باشد" },
+              { key: "shiftCode", label: "کد شیفت", required: true, hint: "کد شیفت فروش (ایستگاه از شیفت می‌آید)" },
+              { key: "shiftDate", label: "تاریخ شروع شیفت", hint: "خالی = همان تاریخ فاکتور؛ تاریخ فاکتور حداکثر یک روز بعد از آن می‌تواند باشد" },
+              { key: "customerDetailCode", label: "کد تفصیل مشتری", hint: "خالی = مشتری پیش‌فرض ایستگاه" },
+              { key: "description", label: "شرح فروش" },
+              { key: "goodsItemCode", label: "کد کالا/خدمت" },
+              { key: "goodsItemOldCode", label: "کد کالا (سیستم قدیم)", hint: "برای مهاجرت از سیستم قبلی؛ دقیقاً یکی از این دو ستون باید در هر ردیف پر باشد" },
+              { key: "quantity", label: "مقدار", required: true },
+              { key: "unitPrice", label: "فی", hint: "خالی = قیمت اعلامیه‌ی ایستگاه؛ فیِ متفاوت فقط برای کاربر دارای مجوز «تغییر فی» پذیرفته می‌شود" },
+              { key: "lineDescription", label: "شرح ردیف" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
         </div>
       </div>
@@ -335,13 +354,13 @@ function SaleForm({ editId }: { editId?: number }) {
   const itemMap = useMemo(() => new Map((sell?.items ?? []).map((i) => [i.id, i])), [sell]);
   const byBarcode = useMemo(() => {
     const m = new Map<string, Sellable>();
-    for (const i of sell?.items ?? []) if (i.barcode) m.set(normDigits(i.barcode.trim()), i);
+    for (const i of sell?.items ?? []) if (i.barcode) m.set(toEnglishDigits(i.barcode.trim()), i);
     return m;
   }, [sell]);
   /** جست‌وجوی «بارکد» هم کد کالا را می‌پذیرد (بارکد اولویت دارد) */
   const byCode = useMemo(() => {
     const m = new Map<string, Sellable>();
-    for (const i of sell?.items ?? []) if (i.fullCode) m.set(normDigits(i.fullCode.trim()), i);
+    for (const i of sell?.items ?? []) if (i.fullCode) m.set(toEnglishDigits(i.fullCode.trim()), i);
     return m;
   }, [sell]);
   const dp = sell?.decimalPlaces ?? 0;
@@ -399,7 +418,7 @@ function SaleForm({ editId }: { editId?: number }) {
   function onBarcodeEnter() {
     const code = barcode.trim();
     if (!code) return;
-    const key = normDigits(code);
+    const key = toEnglishDigits(code);
     const it = byBarcode.get(key) ?? byCode.get(key);
     if (it) addItem(it);
     else interpretAndAdd(code);
@@ -683,11 +702,11 @@ function SaleForm({ editId }: { editId?: number }) {
               <RecordPickerField<CustomerOpt>
                 title="انتخاب مشتری"
                 disabled={!ready}
-                displayValue={customer ? `${toFaDigits(String(customer.code))} — ${customerTitleOf(customer)}` : station ? `${toFaDigits(String(station.customerCode ?? ""))} — ${station.customerTitle}` : ""}
+                displayValue={customer ? `${toFaDigits(String(customer.code))} — ${partyTitleOf(customer)}` : station ? `${toFaDigits(String(station.customerCode ?? ""))} — ${station.customerTitle}` : ""}
                 rows={customers}
                 columns={[
                   { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                  { header: "عنوان", render: (x) => customerTitleOf(x), filterValue: (x) => customerTitleOf(x) },
+                  { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
                 ]}
                 onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
               />

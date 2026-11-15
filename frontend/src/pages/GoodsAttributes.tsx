@@ -42,7 +42,6 @@ function AttributeList() {
   const cacheKey = "/goods-attributes";
   const [items, setItems] = usePersistedState<GoodsAttribute[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/goods-attributes").then(setItems).catch((e) => setError(e.message));

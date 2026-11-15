@@ -53,7 +53,6 @@ function AccountsTree() {
   const cacheKey = "/accounts";
   const [accounts, setAccounts] = usePersistedState<AccountRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
   const { openTab } = useTabs();
 
   async function reload() {
@@ -86,21 +85,6 @@ function AccountsTree() {
   }
   const nodes: TreeNode[] = accounts.map((a) => ({ id: a.id, parentId: a.parentId, code: treeFullCode(a), title: a.title, level: a.level.title }));
 
-  const NATURE_GROUP_FA_REVERSE: Record<string, string> = Object.fromEntries(Object.entries(NATURE_GROUP_FA).map(([k, v]) => [v, k]));
-  const NATURE_DETAIL_FA_REVERSE: Record<string, string> = Object.fromEntries(Object.entries(NATURE_DETAIL_FA).map(([k, v]) => [v, k]));
-  const BALANCE_NATURE_FA_REVERSE: Record<string, string> = Object.fromEntries(Object.entries(BALANCE_NATURE_FA).map(([k, v]) => [v, k]));
-
-  function fullCodeOf(a: { id: number; code: string; parentId: number | null }, pool: { id: number; code: string; parentId: number | null }[]): string {
-    let code = a.code;
-    let cur = a;
-    while (cur.parentId) {
-      const parent = pool.find((x) => x.id === cur.parentId);
-      if (!parent) break;
-      code = parent.code + code;
-      cur = parent;
-    }
-    return code;
-  }
 
   return (
     <div>
@@ -144,10 +128,9 @@ function AccountsTree() {
 
 function AccountForm({ editId, parentId }: { editId?: number; parentId?: number }) {
   const navigate = useNavigate();
-  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}${location.search}`;
-  const [levels, setLevels] = useState<Level[]>([]);
+  const [, setLevels] = useState<Level[]>([]);
   const [detailTypes, setDetailTypes] = useState<DetailType[]>([]);
   const [parentAccount, setParentAccount] = usePersistedState<AccountRow | null>(`${cacheKey}:parentAccount`, null);
   const [currentLevel, setCurrentLevel] = usePersistedState<Level | null>(`${cacheKey}:currentLevel`, null);

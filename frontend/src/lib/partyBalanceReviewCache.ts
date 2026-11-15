@@ -22,7 +22,7 @@ export function setPartyBalanceReviewSnapshot(snapshot: PartyBalanceReviewSnapsh
   store.set(snapshot);
 }
 
-export function clearPartyBalanceReviewSnapshot() {
+function clearPartyBalanceReviewSnapshot() {
   store.clearAll();
 }
 

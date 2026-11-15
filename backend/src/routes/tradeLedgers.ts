@@ -1,21 +1,15 @@
 import { Router } from "express";
-import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
+import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
-import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { assertDateWithinCurrentFiscalPeriod, requireCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { buildTradeLedgerCsv, getTradeLedgerItems, deleteTradeLedger, getTradeLedgerStart, issueTradeLedger } from "../services/tradeLedgerService";
 
 // «دفاتر تجاری» (امور مالیاتی › عملیات) — منطق: services/tradeLedgerService.ts
 
 const FORM = findFormPrefix("trade-ledgers");
 const router = Router();
-
-async function currentPeriodOrThrow() {
-  const p = await getCurrentFiscalPeriod();
-  if (!p) throw new Error("دوره مالی جاری یافت نشد");
-  return p;
-}
 
 async function toDto(l: any) {
   const agg = await prisma.consolidatedDocument.aggregate({
@@ -39,7 +33,7 @@ async function toDto(l: any) {
 
 router.get("/status", can(`${FORM}.view`), async (_req, res) => {
   try {
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     const fromDate = await getTradeLedgerStart(prisma, period);
     res.json({ fiscalPeriodTitle: period.title, fiscalPeriodFromDate: period.fromDate, fiscalPeriodToDate: period.toDate, fromDate });
   } catch (e: any) {
@@ -48,7 +42,7 @@ router.get("/status", can(`${FORM}.view`), async (_req, res) => {
 });
 
 router.get("/", can(`${FORM}.view`), async (_req, res) => {
-  const period = await currentPeriodOrThrow().catch(() => null);
+  const period = await requireCurrentFiscalPeriod().catch(() => null);
   if (!period) return res.json([]);
   const items = await prisma.tradeLedger.findMany({ where: { fiscalPeriodId: period.id }, orderBy: { number: "asc" } });
   res.json(await Promise.all(items.map(toDto)));
@@ -67,7 +61,7 @@ router.post("/", can(`${FORM}.create`), async (req: AuthedRequest, res) => {
     const to = new Date(toDate);
     if (Number.isNaN(to.getTime())) throw new Error("تاریخ پایان معتبر نیست");
     await assertDateWithinCurrentFiscalPeriod(to);
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     res.status(201).json(await issueTradeLedger({ fiscalPeriod: period, toDate: to, userId: req.user?.id ?? null }));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در تهیه دفتر تجاری" });
@@ -76,7 +70,7 @@ router.post("/", can(`${FORM}.create`), async (req: AuthedRequest, res) => {
 
 router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   try {
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     await deleteTradeLedger(Number(req.params.id), period.id);
     res.json({ ok: true });
   } catch (e: any) {
@@ -87,7 +81,7 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
 // تایید / لغو تایید: تغییر وضعیتِ شرطی (updateMany با شرط وضعیت) تا دو درخواست هم‌زمان نتیجه‌ی ناسازگار ندهند
 router.post("/:id/approve", can(`${FORM}.approve`), async (req: AuthedRequest, res) => {
   try {
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     const r = await prisma.tradeLedger.updateMany({
       where: { id: Number(req.params.id), fiscalPeriodId: period.id, status: "DRAFT" },
       data: { status: "APPROVED", approvedAt: new Date(), approvedById: req.user?.id ?? null },
@@ -101,7 +95,7 @@ router.post("/:id/approve", can(`${FORM}.approve`), async (req: AuthedRequest, r
 
 router.post("/:id/unapprove", can(`${FORM}.unapprove`), async (req, res) => {
   try {
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     const r = await prisma.tradeLedger.updateMany({
       where: { id: Number(req.params.id), fiscalPeriodId: period.id, status: "APPROVED" },
       data: { status: "DRAFT", approvedAt: null, approvedById: null },

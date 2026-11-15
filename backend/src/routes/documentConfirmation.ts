@@ -5,7 +5,8 @@ import { renumberJournalEntries } from "../services/journalEntryRenumberService"
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
-import { auditRoute, bodyPick } from "../middleware/auditEvent";
+import { queueAuditEvent } from "../services/auditService";
+import { displayDate } from "../utils/dateDisplay";
 const FORM = findFormPrefix("document-confirmation");
 
 const router = Router();
@@ -71,7 +72,7 @@ async function validate(dateStr: string) {
     where: { fiscalPeriodId: fiscalPeriod.id, date: { lte: date }, status: { not: "APPROVED" } },
   });
 
-  return { fiscalPeriod, date, draftCount, totalInRange };
+  return { fiscalPeriod, date, draftCount, totalInRange, previousConfirmedDate: last?.date ?? null };
 }
 
 // بررسی غیربازدارنده: آیا اسنادی در بازه هنوز در وضعیت «ثبت» هستند؟ (برای نمایش هشدار قبل از تایید نهایی)
@@ -86,9 +87,9 @@ router.post("/check", can(`${FORM}.view`), async (req, res) => {
 });
 
 // تایید نهایی: همه اسناد بازه را به وضعیت «تایید» تغییر می‌دهد (صرف‌نظر از وضعیت فعلی‌شان)
-router.post("/confirm", can(`${FORM}.confirm`), auditRoute("DOCUMENT_CONFIRM", bodyPick("date")), async (req, res) => {
+router.post("/confirm", can(`${FORM}.confirm`), async (req, res) => {
   try {
-    const { fiscalPeriod, date } = await validate(req.body.date);
+    const { fiscalPeriod, date, previousConfirmedDate } = await validate(req.body.date);
     // ابتدا شماره‌گذاری مجدد (همان سرویس مشترکِ عملیات «شماره‌گذاری مجدد» فهرست اسناد)، سپس تایید؛
     // هر دو در یک تراکنش: اگر شماره‌گذاری شکست بخورد هیچ سندی تایید نمی‌شود
     const result = await prisma.$transaction(
@@ -102,6 +103,11 @@ router.post("/confirm", can(`${FORM}.confirm`), auditRoute("DOCUMENT_CONFIRM", b
       },
       { timeout: 120000, maxWait: 20000 }
     );
+    // لاگ تغییرات: یک شرح کلی برای کل عملیات (نه به ازای هر سند)؛ فقط با پاسخ موفق نوشته می‌شود
+    await queueAuditEvent({
+      action: "DOCUMENT_CONFIRM",
+      summary: `تایید اسناد تا تاریخ ${displayDate(date)} — آخرین تاریخ تایید قبلی: ${previousConfirmedDate ? displayDate(previousConfirmedDate) : "ندارد"} — ${result.count} سند تایید شد، ${result.renumbered.count} سند شماره‌گذاری مجدد شد`,
+    });
     res.json({
       updatedCount: result.count,
       renumberedCount: result.renumbered.count,
@@ -157,13 +163,18 @@ router.post("/uncheck", can(`${FORM}.unconfirm`), async (req, res) => {
   }
 });
 
-router.post("/unconfirm", can(`${FORM}.unconfirm`), auditRoute("DOCUMENT_UNCONFIRM", bodyPick("date")), async (req, res) => {
+router.post("/unconfirm", can(`${FORM}.unconfirm`), async (req, res) => {
   try {
     const { fiscalPeriod, date } = await validateRevert(req.body.date);
+    const previousConfirmed = await lastConfirmed(fiscalPeriod.id);
     // شرط وضعیت داخل خودِ updateMany دوباره بررسی می‌شود تا با تایید/برگشت همزمان ناسازگار نشود
     const updated = await prisma.journalEntry.updateMany({
       where: { fiscalPeriodId: fiscalPeriod.id, date: { gte: date }, status: "APPROVED", consolidationSource: { is: null } },
       data: { status: "REVIEW" },
+    });
+    await queueAuditEvent({
+      action: "DOCUMENT_UNCONFIRM",
+      summary: `برگشت از تایید از تاریخ ${displayDate(date)} — آخرین تاریخ تایید قبلی: ${previousConfirmed ? displayDate(previousConfirmed.date) : "ندارد"} — ${updated.count} سند به وضعیت «بررسی» برگشت`,
     });
     res.json({ updatedCount: updated.count, message: "اسناد این تاریخ و بعد از آن به وضعیت «بررسی» برگشتند" });
   } catch (e: any) {

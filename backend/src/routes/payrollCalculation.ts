@@ -4,7 +4,7 @@ import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
 import type { BranchInput } from "../services/payrollCalculationService";
-import { METHOD_FA, PayrollCalcError, assertInputsFitMethod, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage, createPayrollComponent } from "../services/payrollCalculationService";
+import { PayrollCalcError, assertInputsFitMethod, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage, createPayrollComponent } from "../services/payrollCalculationService";
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { buildPayrollListPrint } from "../services/payrollListPrint";
@@ -15,6 +15,7 @@ import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA, LOAN_SUM_KEY, LOA
 import { employeeIdsInPeriod } from "../services/employmentStatusService";
 import { slipJournalLockMessage } from "../services/payrollAccountingService";
 import { slipPrepLockMessage } from "../services/payrollPaymentPrepService";
+import { trimOrNull } from "../utils/inputParse";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
 // محاسبه‌ی فیش یک کارمند و جزئیات آن برای گزارش.
@@ -31,14 +32,10 @@ const router = Router();
 function cleanBranches(raw: unknown): BranchInput[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((x: any) => ({ conditionText: str(x?.conditionText), formulaText: str(x?.formulaText) ?? "" }))
+    .map((x: any) => ({ conditionText: trimOrNull(x?.conditionText), formulaText: trimOrNull(x?.formulaText) ?? "" }))
     .filter((x) => x.conditionText || x.formulaText);
 }
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
 const KINDS = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
 const METHODS = ["CALCULATED", "MANUAL", "ATTENDANCE", "TREASURY"];
 const VALUE_TYPES = ["NUMBER", "TIME", "DAYS", "AMOUNT"];
@@ -71,11 +68,11 @@ router.get("/payroll-calc-types", async (_req, res) => {
 router.post("/payroll-calc-types", can(`${F_TYPE}.create`), async (req, res) => {
   const b = req.body as any;
   try {
-    const title = str(b.title);
+    const title = trimOrNull(b.title);
     if (!title) throw new PayrollCalcError("عنوان الزامی است");
     if (await prisma.payrollCalcType.findFirst({ where: { title } })) throw new PayrollCalcError("نوع محاسبه‌ی دیگری با همین عنوان وجود دارد");
     // نوع پایه فقط همان «حقوق ماهانه»ی seed است؛ نوع جدید همیشه غیرپایه
-    const created = await prisma.payrollCalcType.create({ data: { title, description: str(b.description), isActive: b.isActive ?? true } });
+    const created = await prisma.payrollCalcType.create({ data: { title, description: trimOrNull(b.description), isActive: b.isActive ?? true } });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت نوع محاسبه");
@@ -88,11 +85,11 @@ router.put("/payroll-calc-types/:id", can(`${F_TYPE}.edit`), async (req, res) =>
   try {
     const t = await prisma.payrollCalcType.findUnique({ where: { id } });
     if (!t) return res.status(404).json({ error: "نوع محاسبه یافت نشد" });
-    const title = str(b.title);
+    const title = trimOrNull(b.title);
     if (!title) throw new PayrollCalcError("عنوان الزامی است");
     if (await prisma.payrollCalcType.findFirst({ where: { title, NOT: { id } } })) throw new PayrollCalcError("نوع محاسبه‌ی دیگری با همین عنوان وجود دارد");
     if (t.isBase && b.isActive === false) throw new PayrollCalcError("نوع پایه (حقوق ماهانه) را نمی‌شود غیرفعال کرد");
-    await prisma.payrollCalcType.update({ where: { id }, data: { title, description: str(b.description), isActive: t.isBase ? true : b.isActive ?? t.isActive } });
+    await prisma.payrollCalcType.update({ where: { id }, data: { title, description: trimOrNull(b.description), isActive: t.isBase ? true : b.isActive ?? t.isActive } });
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش نوع محاسبه");
@@ -133,7 +130,7 @@ router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
 router.post("/payroll-components", can(`${F_COMP}.create`), async (req, res) => {
   const b = req.body as any;
   try {
-    const created = await createPayrollComponent({ title: str(b.title) ?? "", kind: b.kind, calcTypeId: Number(b.calcTypeId), description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === true, beneficiaryOrgId: b.beneficiaryOrgId ? Number(b.beneficiaryOrgId) : null });
+    const created = await createPayrollComponent({ title: trimOrNull(b.title) ?? "", kind: b.kind, calcTypeId: Number(b.calcTypeId), description: trimOrNull(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === true, beneficiaryOrgId: b.beneficiaryOrgId ? Number(b.beneficiaryOrgId) : null });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت عامل");
@@ -146,7 +143,7 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
   try {
     const c = await prisma.payrollComponent.findUnique({ where: { id } });
     if (!c) return res.status(404).json({ error: "عامل یافت نشد" });
-    const title = str(b.title);
+    const title = trimOrNull(b.title);
     if (!title) throw new PayrollCalcError("عنوان الزامی است");
     if (await prisma.payrollComponent.findFirst({ where: { title, NOT: { id } } })) throw new PayrollCalcError("عامل دیگری با همین عنوان وجود دارد");
     if (b.kind !== undefined && !KINDS.includes(b.kind)) throw new PayrollCalcError("طبقه نامعتبر است");
@@ -180,7 +177,7 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
       if (users.length) throw new PayrollCalcError("فرمول عامل‌های دیگر به این عامل ارجاع دارد؛ نوع محاسبه‌اش قابل تغییر نیست");
       calcTypeId = nt.id;
     }
-    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === undefined ? undefined : !!b.excludeFromSums, beneficiaryOrgId } });
+    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: trimOrNull(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === undefined ? undefined : !!b.excludeFromSums, beneficiaryOrgId } });
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش عامل");

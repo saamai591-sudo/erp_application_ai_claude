@@ -54,14 +54,6 @@ export function registerReviewReportCache(pathPrefix: string, clear: () => void)
   registrations.push({ pathPrefix, clear });
 }
 
-/** فقط کش گزارشی که مسیرش با pathPrefix ثبت‌شده مطابقت دارد را پاک می‌کند — برای «بازکردن یک تب واقعاً
- * تازه» یا «بستن یک تب» که فقط باید کش همان یک گزارش را دست‌نخورده نگذارد، نه بقیه‌ی گزارش‌های Review. */
-export function clearReviewReportCacheForPath(path: string) {
-  for (const r of registrations) {
-    if (path.startsWith(r.pathPrefix)) r.clear();
-  }
-}
-
 /** کش همه‌ی گزارش‌های Review را پاک می‌کند — برای رویدادهای سراسری که کل زمینه را عوض می‌کنند (مثلاً
  * تغییر دوره مالی جاری در تنظیمات کاربری، جایی که closeAllTabs صدا زده می‌شود). */
 export function clearAllReviewReportCaches() {

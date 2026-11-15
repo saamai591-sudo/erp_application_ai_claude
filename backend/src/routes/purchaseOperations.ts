@@ -1,9 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
-import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -24,20 +22,10 @@ const DELIVERY_AUTHORIZATIONS = findFormPrefix("delivery-authorizations");
 
 const router = Router();
 
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
-
 async function nextNumber(model: { findFirst: (args: any) => Promise<any> }, fiscalPeriodId: number) {
   const last = await model.findFirst({ where: { fiscalPeriodId }, orderBy: { number: "desc" } });
   return last ? last.number + 1 : 1;
 }
-
-const purchaseGroupGoodsFilter = () => ({ docDirection: "INBOUND" as const, docType: "خرید" });
 
 async function isGoodsItemInPurchaseGroup(goodsItemId: number, purchaseGroupId: number) {
   const link = await prisma.purchaseGroupGoodsItem.findUnique({
@@ -204,7 +192,7 @@ router.post("/purchase-requests", can(`${PURCHASE_REQUESTS}.create`), async (req
   if (!body.date || !body.basis || !body.orgUnitId) return res.status(400).json({ error: "تاریخ، مبنا و واحد سازمانی الزامی است" });
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const orgUnit = await prisma.orgUnit.findUnique({ where: { id: body.orgUnitId } });
     if (!orgUnit) throw new Error("واحد سازمانی یافت نشد");
     const lines = await validatePurchaseRequestLines(body.lines, body.basis);
@@ -239,7 +227,7 @@ router.put("/purchase-requests/:id", can(`${PURCHASE_REQUESTS}.edit`), async (re
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این درخواست خرید");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const orgUnit = await prisma.orgUnit.findUnique({ where: { id: body.orgUnitId } });
     if (!orgUnit) throw new Error("واحد سازمانی یافت نشد");
     const lines = await validatePurchaseRequestLines(body.lines, body.basis);
@@ -534,7 +522,7 @@ router.post("/purchase-plannings", can(`${PURCHASE_PLANNINGS}.create`), async (r
   }
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const purchaseGroup = await prisma.purchaseGroup.findUnique({ where: { id: body.purchaseGroupId } });
     if (!purchaseGroup) throw new Error("گروه خرید یافت نشد");
     const expert = await prisma.purchaseExpert.findUnique({ where: { id: body.purchaseExpertId }, include: { groups: true } });
@@ -597,7 +585,7 @@ router.put("/purchase-plannings/:id", can(`${PURCHASE_PLANNINGS}.edit`), async (
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این برنامه ریزی خرید");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const purchaseGroup = await prisma.purchaseGroup.findUnique({ where: { id: body.purchaseGroupId } });
     if (!purchaseGroup) throw new Error("گروه خرید یافت نشد");
     const expert = await prisma.purchaseExpert.findUnique({ where: { id: body.purchaseExpertId }, include: { groups: true } });
@@ -750,7 +738,7 @@ router.post("/inquiry-authorizations", can(`${INQUIRY_AUTHORIZATIONS}.create`), 
   if (!body.date || !body.purchasePlanningId) return res.status(400).json({ error: "تاریخ و برنامه ریزی خرید الزامی است" });
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const planning = await prisma.purchasePlanning.findUnique({ where: { id: body.purchasePlanningId }, include: { purchaseRoute: true } });
     if (!planning) throw new Error("برنامه ریزی خرید یافت نشد");
     if (planning.status !== "APPROVED") throw new Error("برنامه ریزی خرید باید در وضعیت تایید باشد");
@@ -786,7 +774,7 @@ router.put("/inquiry-authorizations/:id", can(`${INQUIRY_AUTHORIZATIONS}.edit`),
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این مجوز استعلام");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const lines = await validateSupplierLines(body.lines);
     await prisma.$transaction([
       prisma.inquiryAuthorizationLine.deleteMany({ where: { inquiryAuthorizationId: id } }),
@@ -964,7 +952,7 @@ router.post("/price-inquiries", can(`${PRICE_INQUIRIES}.create`), async (req, re
   }
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const planning = await prisma.purchasePlanning.findUnique({ where: { id: body.purchasePlanningId }, include: { stage2Rows: true } });
     if (!planning) throw new Error("برنامه ریزی خرید یافت نشد");
     if (planning.status !== "APPROVED") throw new Error("برنامه ریزی خرید باید در وضعیت تایید باشد");
@@ -1045,7 +1033,7 @@ router.put("/price-inquiries/:id", can(`${PRICE_INQUIRIES}.edit`), async (req, r
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این استعلام قیمت");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
 
@@ -1266,7 +1254,7 @@ router.post("/inquiry-evaluations", can(`${INQUIRY_EVALUATIONS}.create`), async 
   if (!body.date || !body.purchasePlanningId) return res.status(400).json({ error: "تاریخ و برنامه ریزی خرید الزامی است" });
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const planning = await prisma.purchasePlanning.findUnique({ where: { id: body.purchasePlanningId }, include: { purchaseRoute: true } });
     if (!planning) throw new Error("برنامه ریزی خرید یافت نشد");
     if (planning.purchaseRoute?.nature !== "INQUIRY") throw new Error("ماهیت مسیر تامین برنامه ریزی خرید انتخاب‌شده باید استعلام باشد");
@@ -1315,7 +1303,7 @@ router.put("/inquiry-evaluations/:id", can(`${INQUIRY_EVALUATIONS}.edit`), async
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این ارزیابی استعلام");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const approvals = body.itemApprovals || {};
     const ops = existing.itemLines.map((l: any) =>
       prisma.inquiryEvaluationItemLine.update({
@@ -1569,7 +1557,7 @@ router.post("/purchase-orders", can(`${PURCHASE_ORDERS}.create`), async (req, re
   if (!body.date || !body.basis || !body.supplierId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، تامین کننده و ارز الزامی است" });
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const supplier = await prisma.supplier.findUnique({ where: { id: body.supplierId } });
     if (!supplier) throw new Error("تامین کننده یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
@@ -1605,7 +1593,7 @@ router.put("/purchase-orders/:id", can(`${PURCHASE_ORDERS}.edit`), async (req, r
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سفارش خرید");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const supplier = await prisma.supplier.findUnique({ where: { id: body.supplierId } });
     if (!supplier) throw new Error("تامین کننده یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
@@ -1796,7 +1784,7 @@ router.post("/delivery-authorizations", can(`${DELIVERY_AUTHORIZATIONS}.create`)
   if (!body.date || !body.supplierId || !body.deliveryDate) return res.status(400).json({ error: "تاریخ، تامین کننده و تاریخ تحویل الزامی است" });
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const supplier = await prisma.supplier.findUnique({ where: { id: body.supplierId } });
     if (!supplier) throw new Error("تامین کننده یافت نشد");
     const lines = await validateDeliveryAuthLines(body.lines);
@@ -1829,7 +1817,7 @@ router.put("/delivery-authorizations/:id", can(`${DELIVERY_AUTHORIZATIONS}.edit`
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این مجوز تحویل");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const supplier = await prisma.supplier.findUnique({ where: { id: body.supplierId } });
     if (!supplier) throw new Error("تامین کننده یافت نشد");
     const lines = await validateDeliveryAuthLines(body.lines);

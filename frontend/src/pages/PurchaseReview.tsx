@@ -15,6 +15,7 @@ import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { appendSortParams } from "../lib/gridSort";
 import { ColumnFilterType, ActiveFilter } from "../components/DataTable";
+import { SignedCell, numCol, negatedNumCol } from "../components/reviewColumns";
 
 // گزارش «مرور خرید» (زنجیره تامین > گزارش) — هم‌الگوی «مرور فروش» (SalesReview.tsx)، دقیقاً هم‌فرمت «مرور حسابها»/«مرور تعدادی-
 // مبلغی انبار» (ChainedTabsBar + useChainedMultiSelect): تب‌های زنجیره‌ای، انتخاب چند ردیف در یک تب،
@@ -103,12 +104,6 @@ const INFO_TEXT =
 
 /** اعداد منفی به‌شکل متعارف حسابداری (داخل پرانتز و قرمز) نمایش داده می‌شوند — دقیقاً هم‌الگوی
  * AmountCell در OlapReports.tsx (کلاس olap-amount-negative، از قبل در styles.css تعریف شده). */
-function SignedCell({ value }: { value: number }) {
-  const negative = value < 0;
-  const text = negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value);
-  return <span className={negative ? "olap-amount-negative" : undefined}>{text}</span>;
-}
-
 // دقیقاً همان مقدار/مبلغِ ردیف، فقط با علامت معکوس — برای ردیف‌های «برگشت از خرید» تب گردش (که مقدار/
 // مبلغ خودشان همیشه مثبت از سرور می‌آید) و برای «تخفیف» ردیف‌های «فروش» (که باید منفی نمایش داده شود).
 function ledgerNegated(r: LedgerRow, field: "quantity" | "amount" | "discount"): number {
@@ -160,36 +155,14 @@ const LEDGER_COLUMNS: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
 ];
 const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.header, c.field]));
 
-function numCol(header: string, field: keyof DimRow): BalanceTableColumn<DimRow> {
-  return {
-    header,
-    render: (r) => formatAmountFa((r[field] as number) || 0),
-    sortValue: (r) => (r[field] as number) || 0,
-    filterType: "number",
-    filterValue: (r) => (r[field] as number) || 0,
-    decimal: true,
-  };
-}
-
 // دقیقاً هم‌الگوی numCol، فقط مقدار نمایشی/مرتب‌سازی/فیلتر با علامت معکوس محاسبه می‌شود — برای «مقدار
 // برگشتی»/«مبلغ برگشتی» (که همیشه باید منفی/قرمز/پرانتزی نمایش داده شوند) و «تخفیف» (که چون از قبل
 // «تخفیف فروش منهای تخفیف برگشت» است، معکوس‌کردنش دقیقاً هر سه قاعده‌ی خواسته‌شده را هم‌زمان درست
 // می‌کند: تخفیفِ فروش‌محور منفی، تخفیفِ برگشت‌محور مثبت — نگاه کنید به یادداشت بالای فایل).
-function negatedNumCol(header: string, field: keyof DimRow): BalanceTableColumn<DimRow> {
-  return {
-    header,
-    render: (r) => <SignedCell value={-((r[field] as number) || 0)} />,
-    sortValue: (r) => -((r[field] as number) || 0),
-    filterType: "number",
-    filterValue: (r) => -((r[field] as number) || 0),
-    decimal: true,
-  };
-}
-
 export default function PurchaseReview() {
   const { openTab } = useTabs();
   const snapshot = getPurchaseReviewSnapshot();
-  const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
+  const [, setPeriods] = useState<FiscalPeriodRange[]>([]);
   const [periodsLoaded, setPeriodsLoaded] = useState(false);
   const [groupLevels, setGroupLevels] = useState<GroupLevel[]>([]);
   const [levelsLoaded, setLevelsLoaded] = useState(false);

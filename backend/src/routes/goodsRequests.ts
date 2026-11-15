@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -41,14 +40,6 @@ async function validateHeaderRefs(requestTypeId: number, orgUnitId: number) {
   const orgUnit = await prisma.orgUnit.findUnique({ where: { id: orgUnitId } });
   if (!orgUnit) throw new Error("واحد سازمانی یافت نشد");
   return { requestType, orgUnit };
-}
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
 }
 
 // فیلد «محل مصرف» بسته به ماهیت نوع درخواست، دقیقاً یکی از سه فیلد را می‌پذیرد (طبق مستند درخواست کالا).
@@ -243,7 +234,7 @@ router.post("/", can(`${FORM}.create`), async (req: AuthedRequest, res) => {
   try {
     const { requestType, orgUnit } = await validateHeaderRefs(body.requestTypeId, body.orgUnitId);
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
 
     const me = req.user ? await prisma.user.findUnique({ where: { id: req.user.id } }) : null;
     const lines = await validateAndCleanLines(body.lines, requestType.nature, me?.partyId ?? null);
@@ -298,7 +289,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req: AuthedRequest, res) => {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این درخواست کالا");
     const { requestType, orgUnit } = await validateHeaderRefs(body.requestTypeId, body.orgUnitId);
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
 
     const me = req.user ? await prisma.user.findUnique({ where: { id: req.user.id } }) : null;
     const lines = await validateAndCleanLines(body.lines, requestType.nature, me?.partyId ?? null);

@@ -33,7 +33,6 @@ function RateList() {
   const cacheKey = "/exchange-rates";
   const [rates, setRates] = usePersistedState<Rate[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/currencies/rates").then(setRates).catch((e) => setError(e.message));
@@ -79,7 +78,7 @@ function RateForm({ editId }: { editId?: number }) {
   const cacheKey = `form:${location.pathname}:form`;
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [form, setForm] = usePersistedState(cacheKey, { date: new Date().toISOString().slice(0, 10), currencyId: "", rate: "" });
-  const [hint, setHint] = useState<string | null>(null);
+  const [] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));

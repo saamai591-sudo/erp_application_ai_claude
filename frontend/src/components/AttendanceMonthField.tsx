@@ -21,7 +21,7 @@ export const EMPTY_MONTH: AttendanceMonth = { year: 0, month: 0, from: "", to: "
 
 const toValue = (m: WorkCalendarMonthFull): AttendanceMonth => ({ year: m.year, month: m.month, from: m.trafficStartDate, to: m.trafficEndDate, start: m.startDate, endDate: m.endDate });
 
-export function currentCalendarMonth(months: WorkCalendarMonthFull[], today = localTodayIso()): WorkCalendarMonthFull | undefined {
+function currentCalendarMonth(months: WorkCalendarMonthFull[], today = localTodayIso()): WorkCalendarMonthFull | undefined {
   const cur = months.find((m) => m.startDate <= today && today <= m.endDate);
   if (cur) return cur;
   const sorted = [...months].sort((a, b) => (a.startDate < b.startDate ? -1 : 1));

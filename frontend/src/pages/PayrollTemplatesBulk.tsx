@@ -11,14 +11,13 @@ import { toFaDigits } from "../lib/formatAmount";
 import { showToast } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
+import { PARTY_KIND_FA } from "../lib/enumLabels";
 
 // حقوق و دستمزد › حسابداری حقوق › الگوی سند حقوق › «تعریف گروهی»: برای یک گروه حساب، یک ماه و یک نوع محاسبه، حساب همه‌ی آیتم‌های بدون الگو را
 // یکجا در گرید انتخاب می‌کنیم و با یک ذخیره برای هر آیتم یک رکورد الگو درج می‌شود (همه‌یا‌هیچ؛ قواعد در سرویس payrollAccountingService).
 
 const NATURE_FA: Record<string, string> = { DEBIT: "بدهکار", CREDIT: "بستانکار" };
 const SECTION_FA: Record<string, string> = { EARNING: "مزایا", DEDUCTION: "کسور", EMPLOYER_COST: "هزینه کارفرما", LOAN: "وام", NET: "خالص پرداختی" };
-const PARTY_KIND_FA: Record<string, string> = { EMPLOYEE: "پرسنل", FACTOR_ORG: "سازمان مرتبط با عامل", SECONDING_ORG: "سازمان مامورکننده" };
-
 interface Options {
   groups: { id: number; code: number; title: string; hasSecondment: boolean; usesProject: boolean }[];
   accounts: { id: number; code: string; title: string; hasPartySlot: boolean }[];

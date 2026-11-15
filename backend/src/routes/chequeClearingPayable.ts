@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { filterChequesByBaseDate, assertChequeBaseDatesNotAfter } from "../services/chequeBaseDates";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
@@ -38,14 +37,6 @@ interface HeaderBody {
   date: string;
   description?: string;
   lines: LineInput[];
-}
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
 }
 
 async function validateLines(lines: LineInput[], formDate: Date, excludeDocId?: number) {
@@ -163,7 +154,7 @@ router.post("/cheque-clearings-payable", can(`${FORM}.create`), async (req, res)
 
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const lines = await validateLines(body.lines, date);
 
     const lastNumber = await prisma.chequeClearingPayable.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
@@ -201,7 +192,7 @@ router.put("/cheque-clearings-payable/:id", can(`${FORM}.edit`), async (req, res
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const lines = await validateLines(body.lines, date, id);
 
     await prisma.$transaction([
@@ -241,7 +232,7 @@ router.post("/cheque-clearings-payable/:id/approve", can(`${FORM}.approve`), asy
   if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک چک داشته باشد" });
 
   try {
-    await resolveFiscalPeriod(d.date);
+    await resolveDocumentFiscalPeriod(d.date);
 
     for (const l of d.lines) {
       if (l.chequeItem.direction !== "PAYABLE" || l.chequeItem.status !== "ISSUED") {
@@ -322,7 +313,6 @@ registerChequeDocReEdit(router, {
   minOneMessage: "سند نتیجه وصول/برگشت باید حداقل یک چک داشته باشد",
   hasOutcome: true,
   revertStatus: "ISSUED",
-  resolveFiscalPeriod,
 });
 
 export default router;

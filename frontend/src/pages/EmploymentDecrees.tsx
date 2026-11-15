@@ -22,17 +22,11 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { DECREE_VALUE_TYPE_FA } from "./HrMasters";
 import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { OptPicker, OrgUnitOfCostCenter, JobField, jobOfPosition, jobMissing, type Opt } from "./Employees";
+import { DECREE_TYPE_FA } from "../lib/enumLabels";
 
 // منابع انسانی › پرسنلی › حکم کارگزینی (قرارداد و حکم یک سند است). پیش‌نویس ⇄ تایید؛ حکم تاییدشده فقط‌خواندنی است و تغییر حقوق = حکم جدید.
 // اعتبار هر حکم از تاریخ اعمال تا min(تاریخ پایان، روز قبل از حکم بعدی) است. حکم می‌تواند همزمان پست/انتصاب کارمند را هم عوض کند.
 
-export const DECREE_TYPE_FA: Record<string, string> = {
-  HIRE: "استخدام",
-  RENEWAL: "تمدید",
-  ANNUAL_RAISE: "افزایش سالانه",
-  PROMOTION: "ارتقا / تغییر پست",
-  AMENDMENT: "اصلاحی",
-};
 const STATUS_FA: Record<string, string> = { DRAFT: "پیش‌نویس", APPROVED: "تایید شده" };
 
 interface ListRow {
@@ -209,7 +203,7 @@ function DecreeForm({ editId }: { editId?: number }) {
   const [components, setComponents] = useState<(Opt & { valueType: string; isActive: boolean })[]>([]);
   const [empTypes, setEmpTypes] = useState<Opt[]>([]);
   const [positions, setPositions] = useState<Opt[]>([]);
-  const [orgUnits, setOrgUnits] = useState<Opt[]>([]);
+  const [, setOrgUnits] = useState<Opt[]>([]);
   const [costCenters, setCostCenters] = useState<Opt[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));

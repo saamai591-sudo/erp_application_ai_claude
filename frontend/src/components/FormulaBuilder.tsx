@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { ErrorToast } from "./ErrorToast";
 import { api, ApiError } from "../lib/api";
+import { toEnglishDigits } from "../lib/digits";
 
 // پنجره‌ی فرمول‌نویس حقوق: روش می‌تواند چند «شاخه» داشته باشد (شرط ← فرمول)؛ هر شاخه «عبارت شرطی» و «عبارت محاسباتی» به‌صورت چیپ دارد و در پایین
 // سه زبانه‌ی عوامل / توابع / مقادیر ثابت است. از بالا به پایین اولین شاخه‌ای که شرطش برقرار است اجرا می‌شود؛ شاخه‌ی بدون شرط («در غیر این صورت»)
@@ -64,10 +65,7 @@ export interface FormulaBranch {
 
 /** ارقام فارسی/عربی → انگلیسی؛ «٫» (جداکننده‌ی اعشار فارسی) → «.» */
 function normalizeDigits(s: string): string {
-  return s
-    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
-    .replace(/٫/g, ".");
+  return toEnglishDigits(s).replace(/٫/g, ".");
 }
 
 /** متن فرمول → فهرست توکن‌ها (هر توکن یک رشته) */

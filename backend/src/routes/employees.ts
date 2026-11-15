@@ -10,6 +10,8 @@ import { loadEmployeeBeneficiaries, saveEmployeeBeneficiaries } from "../service
 import { changeStatus, createInitialRecord, currentStatuses, deleteStatusRecord, isCooperationEnded, statusHistory, updateStatusRecord } from "../services/employmentStatusService";
 import { getEffectiveDecree, getEffectiveDecrees } from "../services/employmentDecreeService";
 import { currentSalaryAccounts } from "../services/employeeSalaryAccountService";
+import { partyTitle } from "../utils/partyTitle";
+import { trimOrNull, parseIsoDay } from "../utils/inputParse";
 
 // منابع انسانی › پرسنلی › کارمندان.
 // SSOT: کارمند یک «نقش» روی Party است (مثل مشتری/تامین‌کننده)؛ نام، کد ملی، نشانی، تلفن و حساب بانکی همان Party هستند و تفصیلی کارمند
@@ -26,25 +28,8 @@ const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const PHOTO_MAX_BYTES = 300 * 1024;
 
 
-function parseDay(v: unknown, label: string, required = true): Date | null {
-  if (v === undefined || v === null || v === "") {
-    if (required) throw new HrError(`${label} الزامی است`);
-    return null;
-  }
-  const d = new Date(`${String(v)}T00:00:00.000Z`);
-  if (isNaN(d.getTime())) throw new HrError(`${label} نامعتبر است`);
-  return d;
-}
+const parseDay = (v: unknown, label: string, required = true): Date | null => parseIsoDay(v, label, (m) => new HrError(m), { required });
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
-
-function partyDisplayName(p: { firstName: string | null; lastName: string | null; name: string | null }) {
-  return [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "";
-}
-
 /** کد پرسنلی خودکار: بزرگ‌ترین کد عددی موجود + ۱، با همان طول (۰۰۰۰۵ → ۰۰۰۰۶) */
 async function nextPersonnelCode(): Promise<string> {
   const rows = await prisma.employee.findMany({ select: { personnelCode: true } });
@@ -137,7 +122,7 @@ router.get("/employees", async (_req, res) => {
         status: statuses.get(e.id) ?? "ACTIVE",
         partyId: e.partyId,
         detailCode: e.party.detailCode,
-        fullName: partyDisplayName(e.party),
+        fullName: partyTitle(e.party),
         nationalId: e.party.nationalId,
         employmentTypeTitle: dec?.decree?.employmentType.title ?? null,
         decreeValidity: dec?.validity ?? "NONE",
@@ -161,7 +146,7 @@ router.get("/employees/available-parties", async (_req, res) => {
     parties.map((p) => ({
       id: p.id,
       detailCode: p.detailCode,
-      fullName: partyDisplayName({ firstName: p.firstName, lastName: p.lastName, name: null }),
+      fullName: partyTitle({ firstName: p.firstName, lastName: p.lastName, name: null }),
       nationalId: p.nationalId,
       birthDate: day(p.birthDate),
       gender: p.gender,
@@ -215,7 +200,7 @@ router.get("/employees/:id", async (req, res) => {
     ...rest,
     current: await loadCurrentRecords(id),
     decree: await decreeSummary(id),
-    party: { ...party, fullName: partyDisplayName(party), birthDate: day(party.birthDate) },
+    party: { ...party, fullName: partyTitle(party), birthDate: day(party.birthDate) },
     photo: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString("base64")}` : null,
     status: history.status,
     beneficiaries: await loadEmployeeBeneficiaries(id),
@@ -252,7 +237,7 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
   if (!b.maritalStatus) throw new HrError("وضعیت تاهل الزامی است");
   if (typeof b.isVeteran !== "boolean") throw new HrError("وضعیت ایثارگری الزامی است");
 
-  let personnelCode = str(b.personnelCode);
+  let personnelCode = trimOrNull(b.personnelCode);
   if (personnelCode && (await prisma.employee.findUnique({ where: { personnelCode } }))) {
     throw new HrError("کد پرسنلی تکراری است");
   }
@@ -266,21 +251,21 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
           data: {
             personnelCode: code,
             partyId,
-            fatherName: str(b.fatherName),
-            birthCertificateNumber: str(b.birthCertificateNumber),
+            fatherName: trimOrNull(b.fatherName),
+            birthCertificateNumber: trimOrNull(b.birthCertificateNumber),
             birthPlaceId: b.birthPlaceId ? Number(b.birthPlaceId) : null,
             issuePlaceId: b.issuePlaceId ? Number(b.issuePlaceId) : null,
             militaryStatus: b.militaryStatus || null,
-            insuranceNumber: str(b.insuranceNumber),
+            insuranceNumber: trimOrNull(b.insuranceNumber),
             hasDisability: !!b.hasDisability,
-            notes: str(b.notes),
+            notes: trimOrNull(b.notes),
           },
         });
         if (photo) await tx.employeePhoto.create({ data: { employeeId: emp.id, ...photo } });
         await createInitialRecord(tx, emp.id, startDate);
         await saveEmployeeBeneficiaries(tx, emp.id, b.beneficiaries); // undefined (ورود از اکسل) = بدون تغییر
         await tx.employeeEducationRecord.create({
-          data: { employeeId: emp.id, effectiveDate: startDate, educationLevelId: Number(b.educationLevelId), field: str(b.educationField) },
+          data: { employeeId: emp.id, effectiveDate: startDate, educationLevelId: Number(b.educationLevelId), field: trimOrNull(b.educationField) },
         });
         await tx.employeeMaritalRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, maritalStatus: b.maritalStatus } });
         await tx.employeeVeteranRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, isVeteran: b.isVeteran } });
@@ -324,7 +309,7 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
     assertRecordNotStale(emp.updatedAt, b.updatedAt, "این کارمند");
     await checkRefs(b);
 
-    const code = b.personnelCode === undefined ? undefined : str(b.personnelCode);
+    const code = b.personnelCode === undefined ? undefined : trimOrNull(b.personnelCode);
     if (code === null) throw new HrError("کد پرسنلی الزامی است");
     if (code !== undefined && code !== emp.personnelCode) {
       if (await prisma.employee.findUnique({ where: { personnelCode: code } })) throw new HrError("کد پرسنلی تکراری است");
@@ -338,14 +323,14 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
         where: { id },
         data: {
           personnelCode: code,
-          fatherName: has("fatherName") ? str(b.fatherName) : undefined,
-          birthCertificateNumber: has("birthCertificateNumber") ? str(b.birthCertificateNumber) : undefined,
+          fatherName: has("fatherName") ? trimOrNull(b.fatherName) : undefined,
+          birthCertificateNumber: has("birthCertificateNumber") ? trimOrNull(b.birthCertificateNumber) : undefined,
           birthPlaceId: has("birthPlaceId") ? (b.birthPlaceId ? Number(b.birthPlaceId) : null) : undefined,
           issuePlaceId: has("issuePlaceId") ? (b.issuePlaceId ? Number(b.issuePlaceId) : null) : undefined,
           militaryStatus: has("militaryStatus") ? b.militaryStatus || null : undefined,
-          insuranceNumber: has("insuranceNumber") ? str(b.insuranceNumber) : undefined,
+          insuranceNumber: has("insuranceNumber") ? trimOrNull(b.insuranceNumber) : undefined,
           hasDisability: has("hasDisability") ? !!b.hasDisability : undefined,
-          notes: has("notes") ? str(b.notes) : undefined,
+          notes: has("notes") ? trimOrNull(b.notes) : undefined,
         },
       });
       await saveEmployeeBeneficiaries(tx, id, b.beneficiaries);
@@ -430,8 +415,8 @@ router.delete("/employees/:id/status-records/:rid", can(`${FORM}.editHistory`), 
 
 // ── وابستگان ──
 function dependentData(b: any) {
-  const firstName = str(b.firstName);
-  const lastName = str(b.lastName);
+  const firstName = trimOrNull(b.firstName);
+  const lastName = trimOrNull(b.lastName);
   if (!firstName || !lastName) throw new HrError("نام و نام خانوادگی وابسته الزامی است");
   if (!RELATIONS.includes(b.relation)) throw new HrError("نسبت نامعتبر است");
   if (b.gender && b.gender !== "MALE" && b.gender !== "FEMALE") throw new HrError("جنسیت نامعتبر است");
@@ -439,13 +424,13 @@ function dependentData(b: any) {
     relation: b.relation,
     firstName,
     lastName,
-    nationalId: str(b.nationalId),
+    nationalId: trimOrNull(b.nationalId),
     birthDate: parseDay(b.birthDate, "تاریخ تولد وابسته", false),
     gender: b.gender || null,
     eligibleForChildAllowance: b.relation === "CHILD" && !!b.eligibleForChildAllowance,
     isStudent: !!b.isStudent,
     hasDisability: !!b.hasDisability,
-    note: str(b.note),
+    note: trimOrNull(b.note),
   };
 }
 

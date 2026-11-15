@@ -16,6 +16,7 @@ import { InfoHint } from "../components/InfoHint";
 import { toFaDigits } from "../lib/formatAmount";
 import { getSavedFiscalPeriodId } from "../lib/userSettings";
 import { RequiredMark } from "../components/RequiredMark";
+import { CheckIcon, UndoIcon } from "../components/icons";
 
 interface Period {
   id: number;
@@ -31,23 +32,6 @@ interface Period {
 interface FiscalPeriod { id: number; title: string; fromDate: string; toDate: string }
 
 const STATUS_FA: Record<Period["status"], string> = { OPEN: "باز", CLOSED: "بسته" };
-
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 // «دوره مالی جاری» یک تنظیم سراسری قابل انتخاب توسط کاربر است (تنظیمات کاربری)، نه لزوماً آخرین دوره
 // مالی تعریف‌شده — دقیقاً همان الگوی resolveFiscalPeriod در JournalEntries.tsx. فقط وقتی کاربر هنوز

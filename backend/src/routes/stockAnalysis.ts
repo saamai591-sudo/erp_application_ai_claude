@@ -17,10 +17,10 @@ router.get("/stock-analysis", can(`${F}.view`), async (_req, res) => {
 router.get("/stock-analysis/:itemId/:kind", can(`${F}.view`), async (req: AuthedRequest, res) => {
   const itemId = Number(req.params.itemId);
   const kind = req.params.kind;
-  if (!Number.isInteger(itemId) || (kind !== "committed" && kind !== "in-transit")) return res.status(400).json({ error: "درخواست نامعتبر است" });
+  if (!Number.isInteger(itemId) || (kind !== "committed" && kind !== "in-transit" && kind !== "in-production")) return res.status(400).json({ error: "درخواست نامعتبر است" });
   const item = await prisma.goodsItem.findUnique({ where: { id: itemId }, select: { fullCode: true, title: true, mainUnit: { select: { title: true } } } });
   if (!item) return res.status(404).json({ error: "کالا یافت نشد" });
-  const orderForm = findFormPrefix(kind === "committed" ? "sales-orders" : "purchase-orders");
+  const orderForm = findFormPrefix(kind === "committed" ? "sales-orders" : kind === "in-transit" ? "purchase-orders" : "production-orders");
   const canOpen = req.user ? await userHasAction(req.user.id, `${orderForm}.view`) : false;
   res.json({ item: { code: item.fullCode, title: item.title, unit: item.mainUnit.title }, kind, canOpen, rows: await getStockAnalysisOrders(itemId, kind) });
 });

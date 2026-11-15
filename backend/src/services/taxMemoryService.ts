@@ -78,7 +78,7 @@ export interface CompanySubject {
  * CSR (PKCS#10، SHA-256) با نامِ موضوع: C=IR، O=نام انگلیسی شرکت، OU=نام فارسی شرکت (UTF-8)، CN=نام انگلیسی شرکت،
  * serialNumber=شناسه ملی، emailAddress=ایمیل. با همان کلید خصوصیِ جفت‌کلید امضا می‌شود.
  */
-export function buildCsr(privateKeyPem: string, c: CompanySubject): string {
+function buildCsr(privateKeyPem: string, c: CompanySubject): string {
   const privateKey = forge.pki.privateKeyFromPem(privateKeyPem) as forge.pki.rsa.PrivateKey;
   const publicKey = forge.pki.setRsaPublicKey(privateKey.n, privateKey.e);
   const csr = forge.pki.createCertificationRequest();

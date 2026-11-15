@@ -15,6 +15,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA } from "../lib/payrollLabels";
+import { toEnglishDigits } from "../lib/digits";
 
 // منابع انسانی › تنظیمات › تقویم کاری: برای هر سال شمسی ساعات کاری روزانه و ۱۲ ماه (روز/ساعت استاندارد و مجاز) تعریف می‌شود؛ بازه‌ی تردد هر ماه فقط در بک‌اند نگهداری می‌شود و نمایش داده نمی‌شود.
 // ماه در فرم‌های حقوق (روش محاسبه، پارامتر مبنا، ورود اطلاعات، محاسبه) فقط از همین تقویم انتخاب می‌شود.
@@ -39,18 +40,11 @@ interface MonthRow {
 }
 
 /** دقیقه → «ساعت:دقیقه» (ساعت تا سه رقم، مثل ۲۲۷:۲۰) */
-export function minutesToHm(min: number): string {
+function minutesToHm(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${h}:${String(m).padStart(2, "0")}`;
 }
-const toLatin = (s: string) => s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
-/** «۷:۲۰» → دقیقه (null = نامعتبر) */
-function hmToMinutes(s: string): number | null {
-  const m = /^(\d{1,3}):([0-5]\d)$/.exec(toLatin(s).trim());
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
-}
-
 export default function WorkCalendars() {
   const location = useLocation();
   const { id } = useParams();
@@ -154,7 +148,7 @@ function CalendarForm({ editId }: { editId?: number }) {
   async function createCalendar() {
     setError(null);
     try {
-      const r = await api.get(`/work-calendars/preview?year=${encodeURIComponent(toLatin(form.year).trim())}&dailyTime=${encodeURIComponent(toLatin(form.dailyTime).trim())}`);
+      const r = await api.get(`/work-calendars/preview?year=${encodeURIComponent(toEnglishDigits(form.year).trim())}&dailyTime=${encodeURIComponent(toEnglishDigits(form.dailyTime).trim())}`);
       setDailyMinutes(r.dailyMinutes);
       setRows(r.months);
     } catch (e) {
@@ -177,7 +171,7 @@ function CalendarForm({ editId }: { editId?: number }) {
         await load(editId);
         flash();
       } else {
-        const created = await api.post("/work-calendars", { year: Number(toLatin(form.year).trim()), dailyTime: toLatin(form.dailyTime).trim(), months });
+        const created = await api.post("/work-calendars", { year: Number(toEnglishDigits(form.year).trim()), dailyTime: toEnglishDigits(form.dailyTime).trim(), months });
         flash();
         navigate(`/work-calendars/${created.id}/edit`);
       }
@@ -212,7 +206,7 @@ function CalendarForm({ editId }: { editId?: number }) {
         <div className="form-grid">
           <div className="form-field">
             <label>سال<RequiredMark /></label>
-            <input dir="ltr" inputMode="numeric" disabled={!!editId} maxLength={4} value={form.year} onChange={(e) => setForm({ ...form, year: toLatin(e.target.value).replace(/\D/g, "") })} autoFocus={!editId} />
+            <input dir="ltr" inputMode="numeric" disabled={!!editId} maxLength={4} value={form.year} onChange={(e) => setForm({ ...form, year: toEnglishDigits(e.target.value).replace(/\D/g, "") })} autoFocus={!editId} />
           </div>
           <div className="form-field">
             <label>ساعات روزانه<RequiredMark /></label>
@@ -264,7 +258,7 @@ function CalendarForm({ editId }: { editId?: number }) {
                           style={{ width: 60, textAlign: "center" }}
                           value={String(r.allowedDays)}
                           onChange={(e) => {
-                            const v = Number(toLatin(e.target.value).replace(/\D/g, "").slice(0, 2) || 0);
+                            const v = Number(toEnglishDigits(e.target.value).replace(/\D/g, "").slice(0, 2) || 0);
                             // ساعت مجاز پیش‌فرض = روز مجاز × ساعات روزانه (بعداً قابل ویرایش دستی است)
                             patch(r.month, { allowedDays: v, allowedMinutes: v * dailyMinutes });
                           }}

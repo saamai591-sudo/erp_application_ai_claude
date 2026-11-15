@@ -21,11 +21,6 @@ export interface EffectiveDated {
 
 const dayValue = (d: Date | string) => new Date(d).getTime();
 
-/** کلید هم‌ارزیِ رکوردها: رکوردهایی با این کلیدِ یکسان، نسخه‌های تاریخی یک تنظیم‌اند */
-export function settingKey(s: Omit<EffectiveDated, "id" | "effectiveDate">): string {
-  return [s.accountType, s.accountingGroupId ?? "", s.warehouseGroupId ?? "", s.salesTypeId ?? "", s.warehouseDocType ?? "", s.purchaseTypeId ?? "", s.serviceId ?? ""].join("|");
-}
-
 /**
  * از میان رکوردهای واکشی‌شده، آنهایی که با شرط match جور شده‌اند را می‌گیرد و برای هر کلید فقط رکورد مؤثر در تاریخ سند را برمی‌گرداند
  * (آخرین effectiveDate ≤ docDate). اگر برای یک کلید هیچ رکوردی تا آن تاریخ شروع نشده باشد، آن کلید نتیجه ندارد.

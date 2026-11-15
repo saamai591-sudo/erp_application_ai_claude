@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { generateDetailCode, registerDetailCode, resolveDetailCode, nextSerialNumber } from "../utils/coding";
+import { registerDetailCode, resolveDetailCode, nextSerialNumber } from "../utils/coding";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 

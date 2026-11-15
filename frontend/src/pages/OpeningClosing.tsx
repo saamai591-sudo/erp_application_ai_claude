@@ -15,6 +15,7 @@ import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { useTabs } from "../lib/TabsContext";
 import { useSelectedFiscalPeriod } from "../lib/useSelectedFiscalPeriod";
+import { JOURNAL_STATUS_FA } from "../lib/enumLabels";
 
 interface ListItem {
   id: number;
@@ -31,8 +32,6 @@ interface ListItem {
 }
 
 const TYPE_FA: Record<string, string> = { OPENING: "افتتاحیه", CLOSING: "اختتامیه" };
-const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
-
 export default function OpeningClosing() {
   const location = useLocation();
   const { id } = useParams();
@@ -103,7 +102,7 @@ function EntryForm({ viewId }: { viewId?: number }) {
   const [type, setType] = usePersistedState<"OPENING" | "CLOSING">(`${cacheKey}:type`, "OPENING");
   const [description, setDescription] = usePersistedState(`${cacheKey}:desc`, "");
   const [loading, setLoading] = useState(false);
-  const [issuing, setIssuing] = useState(false);
+  const [, setIssuing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<any>(viewId ? { id: viewId } : null);
 
@@ -207,7 +206,7 @@ function EntryForm({ viewId }: { viewId?: number }) {
           <span><b>شماره:</b> {toFaDigits(String(saved.number))}</span>
           <span><b>دوره مالی:</b> {saved.fiscalPeriodTitle}</span>
           {saved.issued && (
-            <span><b>وضعیت سند:</b> <span className="badge">{STATUS_FA[saved.journalEntryStatus] || saved.journalEntryStatus}</span></span>
+            <span><b>وضعیت سند:</b> <span className="badge">{JOURNAL_STATUS_FA[saved.journalEntryStatus] || saved.journalEntryStatus}</span></span>
           )}
         </div>
       )}

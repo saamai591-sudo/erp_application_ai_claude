@@ -2,6 +2,8 @@ import { prisma } from "../lib/prisma";
 import { PAYMENT_DOC_INCLUDE, paymentLineDoc, effectivePaymentLine } from "./settlementDocRef";
 import { getAdvancePaymentMethodForDate } from "./accountingSettingsService";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // تخصیص پیش‌پرداخت به فاکتور خرید — طبق Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md، دقیقاً هم‌الگوی
@@ -19,7 +21,7 @@ const TOLERANCE = 0.005;
 // دو ماهیت قابل تخصیص (هم‌الگوی فروش، services/salesInvoiceAdvanceService.ts): «پیش‌پرداخت» (سقف = مبلغ فاکتور) و «پیش‌پرداخت ارزش افزوده»
 // (سقف = ارزش‌افزوده‌ی فاکتور). هر ماهیت جدا کنترل می‌شود و هرگز با دیگری جمع نمی‌شود.
 export type PurchaseAdvanceNature = "ADVANCE_PAYMENT" | "ADVANCE_VAT_PAYMENT";
-export const PURCHASE_ADVANCE_NATURES: PurchaseAdvanceNature[] = ["ADVANCE_PAYMENT", "ADVANCE_VAT_PAYMENT"];
+const PURCHASE_ADVANCE_NATURES: PurchaseAdvanceNature[] = ["ADVANCE_PAYMENT", "ADVANCE_VAT_PAYMENT"];
 const NATURE_FA: Record<PurchaseAdvanceNature, string> = { ADVANCE_PAYMENT: "پیش‌پرداخت", ADVANCE_VAT_PAYMENT: "پیش‌پرداخت ارزش افزوده" };
 
 // -------------------------------------------------------------------------
@@ -128,10 +130,6 @@ async function loadInvoice(invoiceId: number, kind: PurchaseAdvanceKind) {
   return Object.assign(typed, { vatTotal });
 }
 
-function partyName(p: any): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 // پیش‌پرداخت‌های قابل نمایش برای یک فاکتور (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md، بند «کنترل‌های Selector»): طرف حساب یکسان،
 // نوع پرداختِ دارای ماهیت «پیش‌پرداخت» (ADVANCE_PAYMENT)، پرداخت تاییدشده، تاریخ پرداخت ≤ تاریخ فاکتور، ارز یکسان و مبلغ قابل
 // تخصیص > صفر (ردیف‌هایی که همین فاکتور از آن‌ها تخصیص گرفته هم برای ویرایش نمایش داده می‌شوند).
@@ -184,7 +182,7 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: Pu
       id: invoice.id,
       number: invoice.number,
       date: invoice.date,
-      partyTitle: partyName(invoice.party),
+      partyTitle: partyTitle(invoice.party),
       currencyTitle: invoice.currency.title,
       total,
       vatTotal,
@@ -324,8 +322,7 @@ export async function computePurchaseInvoiceLineCosts(invoiceId: number): Promis
   const noShare = () => invoice.lines.map((l) => ({ lineId: l.id, cost: netBaseOf(l), exchangeRateAdjustmentShare: 0 }));
   if (invoice.basis !== "WAREHOUSE_RECEIPT" && invoice.basis !== "ASSET_RECEIPT") return noShare();
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
   if (invoice.currencyId === baseCurrency.id) return noShare();
 
   // سهم تسعیر در Cost فقط از «پیش‌پرداخت» عادی می‌آید؛ تسعیر «پیش‌پرداخت ارزش افزوده» روی ارزش‌افزوده شناسایی می‌شود (سند حسابداری فاکتور)، نه Cost کالا

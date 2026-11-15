@@ -1,7 +1,8 @@
 import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { hasExcessDecimals } from "../utils/amountDecimals";
-import { PartyBalanceRole, ROLE_TITLE, closingBalances, getCloseContext, openingLockReason } from "./partyBalanceService";
+import { PartyBalanceRole, ROLE_TITLE, closingBalances, openingLockReason } from "./partyBalanceService";
+import { getCloseContext } from "../utils/fiscalPeriodValidation";
 
 // =========================================================================
 // رکوردهای «مانده اول دوره» مشتریان/تامین‌کنندگان (فرم داده‌ای) — تنها نویسنده‌ی این جدول‌ها: فرم و «ورود از اکسل» هر دو از همین توابع می‌گذرند.

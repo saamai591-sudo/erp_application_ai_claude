@@ -7,12 +7,13 @@ import { RefreshButton } from "../components/RefreshButton";
 import { InfoHint } from "../components/InfoHint";
 import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
 import { getPartyBalanceReviewSnapshot, setPartyBalanceReviewSnapshot } from "../lib/partyBalanceReviewCache";
-import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
+import { toFaDigits } from "../lib/formatAmount";
 import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefaultDate";
 import { useReviewTabLoader, useReviewTabActivation, useReviewTabViewState, serializeForDepsKey } from "../lib/useReviewTabLoader";
 import { useFxEnabled } from "../lib/useEntitlements";
 import { api } from "../lib/api";
 import { ColumnFilterType } from "../components/DataTable";
+import { SignedCell } from "../components/reviewColumns";
 
 // «مانده مشتریان» (فروش › گزارش)، «مانده تامین‌کنندگان» (زنجیره تامین › گزارش) و «مانده طرف‌حساب‌ها» (حسابداری › گزارش؛ هر دو نقش، تفکیکی یا تجمیعی) —
 // گزارش از پایه‌ی «مرورها» (هم‌الگوی مرور گروه دارایی): دو تب زنجیره‌ای «گروه» (اول) و «طرف‌حساب»؛ انتخاب ردیف در هر تب، تب بعدی را فیلتر می‌کند
@@ -73,11 +74,6 @@ const CONFIG: Record<Scope, { slug: string; title: string; noun: string; groupLa
 };
 
 /** اعداد منفی به‌شکل متعارف حسابداری (داخل پرانتز و قرمز) — همان الگوی صفحه‌های مرور؛ کلاس olap-amount-negative در styles.css هست. */
-function SignedCell({ value }: { value: number }) {
-  const negative = value < 0;
-  return <span className={negative ? "olap-amount-negative" : undefined}>{negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value)}</span>;
-}
-
 export default function PartyBalanceReport({ scope }: { scope: Scope }) {
   const cfg = CONFIG[scope];
   const base = `/party-balance-report/${cfg.slug}`;

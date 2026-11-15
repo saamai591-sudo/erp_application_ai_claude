@@ -20,6 +20,7 @@ import { AccountingGroup } from "./AccountingGroups";
 import { WarehouseGroup } from "./WarehouseGroups";
 import { PurchaseType } from "./PurchaseTypes";
 import { SalesType } from "./SalesTypes";
+import { WAREHOUSE_DOC_TYPE_FA } from "../lib/warehouseDocTypes";
 
 const ACCOUNT_TYPE_FA: Record<string, string> = {
   SALES_VAT: "ارزش افزوده فروش",
@@ -35,6 +36,7 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   PURCHASE_VAT: "ارزش افزوده خرید",
   RETURN_CONTROL: "کنترل برگشت",
   SERVICE_PURCHASE: "خرید خدمت",
+  PRODUCTION_WIP: "کالای در جریان ساخت",
 };
 
 const SALES_TYPES = new Set(["SALES_VAT", "SALES_RECEIVABLE", "SALES_RETURN", "SALES_DISCOUNT", "SALES_REVENUE"]);
@@ -43,34 +45,11 @@ const WAREHOUSE_DOC_TYPES = new Set(["WAREHOUSE_RECEIPT_CREDIT", "WAREHOUSE_ISSU
 const PURCHASE_TYPES = new Set(["PURCHASE_PAYABLE", "PURCHASE_CONTROL", "PURCHASE_VAT"]);
 // طبق تصمیم صریح کاربر: این دو نوع حساب دیگر بر اساس «گروه حسابداری» تفکیک نمی‌شوند — فیلد گروه
 // حسابداری برایشان کاملاً از فرم/فهرست حذف می‌شود (نه فقط غیرفعال)، فقط بر اساس نوع فروش/نوع خرید.
-const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE", "SERVICE_PURCHASE"]);
+const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE", "SERVICE_PURCHASE", "PRODUCTION_WIP"]);
 // «خرید خدمت»: معین بدهکار خرید هر خدمت (فقط خدمتِ دارای نحوه حسابداری «هزینه»)؛ به‌جای گروه حسابداری، «خدمت» انتخاب می‌شود.
 // خدمتِ «بهای موجودی» معین خرید جداگانه ندارد و در فهرست انتخاب نمی‌آید.
 const SERVICE_TYPES = new Set(["SERVICE_PURCHASE"]);
 
-// دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES (بک‌اند): «بستانکار رسید انبار» یعنی
-// اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
-const WAREHOUSE_DOC_TYPE_FA: Record<string, string> = {
-  INITIAL_INVENTORY: "موجودی اول دوره",
-  WAREHOUSE_RECEIPT: "رسید انبار خرید",
-  WAREHOUSE_TRANSFER_IN: "رسید انتقال",
-  WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
-  SALES_RETURN: "برگشت از فروش",
-  STORE_SALE_RETURN: "برگشت حواله فروش فروشگاهی",
-  STORE_SALE_ISSUE: "حواله فروش فروشگاهی",
-  PRODUCTION_RECEIPT: "رسید تولید",
-  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
-  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
-  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
-  SALES_DELIVERY: "حواله فروش",
-  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
-  PROJECT_CONSUMPTION: "مصرف پروژه",
-  PRODUCTION_CONSUMPTION: "مصرف تولید",
-  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
-  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
-  WAREHOUSE_TRANSFER_OUT: "حواله انتقالی",
-  INVENTORY_COUNTING_SHORTAGE: "کسری انبارگردانی",
-};
 // طبق تصمیم صریح کاربر: «موجودی اول دوره» هرگز سند حسابداری صادر نمی‌کند (نگاه کنید به
 // issueWarehouseJournalEntries.ts's EXCLUDED_DOC_TYPES)، پس در این پیکر تنظیم حساب هم گزینه‌ای برایش
 // معنا ندارد — WAREHOUSE_DOC_TYPE_FA عمداً نگه داشته شده (برای نمایش صحیحِ رکوردهای قدیمی اگر روزی
@@ -152,7 +131,6 @@ function SettingList() {
   const cacheKey = "/goods-service-accounting";
   const [items, setItems] = usePersistedState<GoodsServiceAccountingSetting[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/goods-service-accounting").then(setItems).catch((e) => setError(e.message));

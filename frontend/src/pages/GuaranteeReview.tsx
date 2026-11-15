@@ -15,6 +15,7 @@ import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { appendSortParams } from "../lib/gridSort";
 import { ColumnFilterType, ActiveFilter } from "../components/DataTable";
+import { SignedCell } from "../components/reviewColumns";
 
 // گزارش «مرور تضامین دریافتی/پرداختی» (مدیریت خزانه › گزارش): یک صفحه برای هر دو جهت (prop direction) با سه تب زنجیره‌ای «طرف حساب» ← «ابزار» ← «گردش».
 // مبالغ به ارز خودِ ابزار؛ مانده = مجموع مبلغ فعلی ابزارهای ابطال/استردادنشده. قواعد: backend/src/routes/guaranteeReview.ts.
@@ -88,11 +89,6 @@ const DUE_OPTIONS = [
 ];
 
 /** اعداد منفی به‌شکل متعارف حسابداری (داخل پرانتز و قرمز) */
-function SignedCell({ value }: { value: number }) {
-  const negative = value < 0;
-  return <span className={negative ? "olap-amount-negative" : undefined}>{negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value)}</span>;
-}
-
 function numCol<T extends BalanceFields>(header: string, field: keyof BalanceFields, signed = false): BalanceTableColumn<T> {
   return {
     header,

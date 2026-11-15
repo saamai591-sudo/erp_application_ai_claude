@@ -35,7 +35,7 @@ export function cycleDayIndex(cycleType: string, cycleLength: number, cycleStart
   return mod(Math.round((date.getTime() - anchor.getTime()) / DAY_MS), cycleLength);
 }
 
-export async function effectiveAssignmentOn(employeeId: number, date: Date) {
+async function effectiveAssignmentOn(employeeId: number, date: Date) {
   return prisma.attendanceShiftAssignment.findFirst({
     where: { employeeId, fromDate: { lte: date } },
     orderBy: { fromDate: "desc" },
@@ -44,7 +44,7 @@ export async function effectiveAssignmentOn(employeeId: number, date: Date) {
 }
 
 /** ردیف‌ها/پنجره‌های یک روز کاری برای کارمند؛ null = شیفتی منتسب نیست */
-export async function windowRowsOn(employeeId: number, date: Date): Promise<WindowOption[] | null> {
+async function windowRowsOn(employeeId: number, date: Date): Promise<WindowOption[] | null> {
   const a = await effectiveAssignmentOn(employeeId, date);
   if (!a) return null;
   const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.shift.cycleStartDate, date);

@@ -7,7 +7,7 @@ import type { JobDefinition } from "./types";
 // این‌جا همان مجموعه‌ی دسترسی‌ها (نقش‌ها + اعطای مستقیم، getUserActionKeys) با آن‌ها مقایسه می‌شود.
 
 /** کلیدهای دسترسی لازم برای این کار با پارامترهای ذخیره‌شده (کلید ثبت‌نشده در Registry خطای معماری است) */
-export function requiredActionKeys(def: JobDefinition, params: Record<string, any>): string[] {
+function requiredActionKeys(def: JobDefinition, params: Record<string, any>): string[] {
   const keys = def.requiredActions ? def.requiredActions(params) : [];
   for (const k of keys) {
     if (!isRegisteredActionKey(k)) throw new Error(`خطای معماری: کلید دسترسی «${k}» (کار ${def.key}) در Registry ثبت نشده است`);

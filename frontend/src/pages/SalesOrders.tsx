@@ -27,6 +27,8 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DownstreamMenu } from "../components/DownstreamMenu";
 import { ORDER_DOWNSTREAM_ACTIONS, OrderFromQuotePrefill } from "../components/DownstreamDialogs";
 import { takeFormPrefill } from "../lib/formPrefill";
+import { CheckIcon, UndoIcon, PlusIcon } from "../components/icons";
+import { partyTitleOf } from "../lib/partyDisplay";
 
 // «سفارش فروش» (تایید مشتری) — مرحله دوم زنجیره فروش. مبنا: بدون مبنا / پیش‌فاکتور. طبق تصمیم
 // صریح کاربر، «مانده‌ای» فقط برای حواله فروش/فاکتور فروش لازم است؛ اینجا (مثل سفارش خرید از استعلام
@@ -43,11 +45,6 @@ interface CustomerOption { id: number; code: number; party: { category: "INDIVID
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 interface PickableQuoteLine { id: number; sourceSalesQuoteLineId: number; salesQuoteId: number; number: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; unitPrice: number; unitDiscount: number; quantity: number; done: number; remaining: number }
-
-function customerTitle(c: CustomerOption): string {
-  if (c.party.detailTitle) return c.party.detailTitle;
-  return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
-}
 
 interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; sourceSalesQuoteLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
@@ -67,26 +64,10 @@ export default function SalesOrders() {
   return <SalesOrderList />;
 }
 
-function CheckIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
-}
-
 function SalesOrderList() {
   const cacheKey = "/sales-orders";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     try {
@@ -484,12 +465,12 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                 disabled={headerDisabled}
                 displayValue={(() => {
                   const c = customers.find((x) => String(x.id) === header.customerId);
-                  return c ? `${toFaDigits(String(c.code))} — ${customerTitle(c)}` : "";
+                  return c ? `${toFaDigits(String(c.code))} — ${partyTitleOf(c)}` : "";
                 })()}
                 rows={customers}
                 columns={[
                   { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                  { header: "عنوان", render: (x) => customerTitle(x), filterValue: (x) => customerTitle(x) },
+                  { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
                 ]}
                 onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
               />

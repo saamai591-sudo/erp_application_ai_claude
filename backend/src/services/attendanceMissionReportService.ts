@@ -12,7 +12,7 @@ const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
 
 export const REPORT_INCLUDE = { request: { include: { employee: { select: EMPLOYEE_SELECT }, requestType: true } }, type: true };
 
-export function reportShape(r: any, ranges?: LockRange[]) {
+function reportShape(r: any, ranges?: LockRange[]) {
   const req = r.request;
   const locked = !!req && dateLocked(ranges, req.toDate);
   return {

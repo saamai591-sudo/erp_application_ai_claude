@@ -20,6 +20,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
 import { EmployeePickerField, useEmployeeOptions } from "./AttendancePunches";
+import { toEnglishDigits } from "../lib/digits";
 
 // مدیریت تردد › عملیات › «مانده‌ی مرخصی»: مانده‌ی اولیه یا اصلاح دستی (افزایش/کاهش) مانده‌ی مرخصی یک کارمند برای یک نوع مرخصی که «از مانده کم می‌شود».
 // مقدار برای نوع «روزانه» به روز و برای نوع «روزانه و ساعتی» به ساعت:دقیقه است. مانده‌ی نهایی = مانده‌ی دستی + استحقاق ماهانه − مصرف درخواست‌ها (دکمه‌ی «گردش مانده»).
@@ -214,7 +215,7 @@ function EntryForm({ editId }: { editId?: number }) {
     if (!form.reason.trim()) return setError("دلیل الزامی است");
     let amount: number;
     if (unit === "DAY") {
-      amount = Number(form.amount.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
+      amount = Number(toEnglishDigits(form.amount));
       if (!Number.isFinite(amount) || amount <= 0) return setError("مقدار (روز) باید عددی بزرگ‌تر از صفر باشد");
     } else {
       const m = maskToMinutes(form.amount);

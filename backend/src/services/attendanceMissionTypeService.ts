@@ -48,7 +48,7 @@ export async function saveMissionType(body: any, id?: number) {
 }
 
 /** عنوان عامل‌های تردد که به متغیر این نوع ارجاع داده‌اند */
-export async function factorsUsingMissionType(id: number): Promise<string[]> {
+async function factorsUsingMissionType(id: number): Promise<string[]> {
   const re = new RegExp(`\\[(V|T):${missionTypeKey(id)}(:[A-Za-z_]+)?\\]`, "i");
   return formulaUsers(re);
 }

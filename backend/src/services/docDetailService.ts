@@ -139,21 +139,12 @@ DOC_KINDS.SERVICE_PURCHASE_INVOICE = { baseEntity: "Party", store: servicePurcha
 /** فاکتور خرید کالا: تفصیل پایه = طرف مقابل (تأمین‌کننده) */
 DOC_KINDS.PURCHASE_INVOICE = { baseEntity: "Party", store: purchaseInvoiceStore };
 
-export const isDocKind = (kind: string) => Object.prototype.hasOwnProperty.call(DOC_KINDS, kind);
 const kindOf = (kind: string): DocKind => {
   const k = DOC_KINDS[kind];
   if (!k) throw new Error(`نوع سند «${kind}» تفصیل اضافه ندارد`);
   return k;
 };
 export const docKindStore = (kind: string) => kindOf(kind).store;
-
-/** سازگاری با کدهای قبلی: تفصیل پایه‌ی هر نوع سند */
-export const BASE_ENTITY_BY_DOC_TYPE: Record<string, BaseEntity | null> = new Proxy({} as Record<string, BaseEntity | null>, {
-  get: (_t, p: string) => DOC_KINDS[p]?.baseEntity ?? null,
-  ownKeys: () => Object.keys(DOC_KINDS),
-  getOwnPropertyDescriptor: (_t, p: string) => (p in DOC_KINDS ? { enumerable: true, configurable: true, value: DOC_KINDS[p].baseEntity } : undefined),
-  has: (_t, p: string) => p in DOC_KINDS,
-});
 
 /** کد (DetailType.code) نوع تفصیلِ هر موجودیت پایه — همان کدهای سیستمی «طرف حساب/مرکز هزینه/پروژه» */
 const DETAIL_TYPE_CODE_BY_ENTITY: Record<BaseEntity, number> = { Party: 1, CostCenter: 2, Project: 8 };

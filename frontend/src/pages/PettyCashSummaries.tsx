@@ -24,9 +24,12 @@ import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { partyDisplayName } from "./Users";
+
 import { DescriptionField } from "../components/DescriptionField";
 import { basisKeyOf, rowBasisKey, basisDisplayOf } from "../components/PaymentBasisPicker";
+import { CheckIcon, UndoIcon, PlusIcon, EyeIcon } from "../components/icons";
+import { partyDisplayName } from "../lib/partyDisplay";
+import { createClientKeyGenerator } from "../lib/rowHelpers";
 
 // «خلاصه تنخواه» (مدیریت خزانه › پرداخت): پرداخت‌های تنخواهِ ثبت‌شده‌ی یک تنخواه‌دار را به حساب‌های حسابداری وصل می‌کند.
 // دو مرحله‌ای هم‌الگوی سند پرداخت: «تایید» سند را قفل و تسعیر ردیف‌های مبنادار را محاسبه می‌کند؛ «صدور سند حسابداری»
@@ -203,11 +206,7 @@ interface LineState {
   exchangeGainLoss: number;
 }
 
-let clientKeySeq = 0;
-function nextClientKey() {
-  clientKeySeq += 1;
-  return `pcs-${Date.now()}-${clientKeySeq}`;
-}
+const nextClientKey = createClientKeyGenerator("pcs");
 
 function EditIcon() {
   return (
@@ -944,33 +943,3 @@ function ModifyPaymentTypeDialog({
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function EyeIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}

@@ -1,5 +1,4 @@
 import { findEffectiveSetting } from "./goodsAccountingSettingService";
-import { prisma } from "../lib/prisma";
 import { findEffectiveTreasurySetting } from "./treasurySettingService";
 
 // معینِ «موضوع پرداخت» بر اساس نوع پرداخت و (در صورت مبنادار بودن) سند مبنا — طبق قواعد پیاده‌شده در

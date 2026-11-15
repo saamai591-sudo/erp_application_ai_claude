@@ -1,8 +1,11 @@
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveCurrentYearFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { BANK_ACCOUNT_TITLE_INCLUDE, bankAccountDetailTitle } from "../utils/detailValues";
 import { StoreSaleError, assertAfterLastDelivery, cleanLines, loadShift, loadStation, resolveCustomer } from "./storeSaleService";
+import { getBaseCurrencyDecimals } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
+import { parseDateOnlyUtc } from "../utils/inputParse";
 
 // فروش فروشگاهی › «برگشت فروش» و «پرداخت فروشگاهی» (بازپرداخت به مشتری) — تنها محل قواعد.
 // • برگشت فروش یک سند مستقل وابسته به «یک فروش» (هر وضعیتی) است؛ هر ردیف به یک ردیف همان فروش وصل است و جمع مقدارِ برگشتیِ هر ردیف (همه‌ی برگشت‌ها) از مقدار فروش بیشتر نمی‌شود.
@@ -13,25 +16,9 @@ import { StoreSaleError, assertAfterLastDelivery, cleanLines, loadShift, loadSta
 
 const EPS = 1e-6;
 const dayStr = (d: Date) => d.toISOString().slice(0, 10);
-const partyTitle = (p: any) => (p ? p.detailTitle || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.name || "" : "");
+const parseDate = (raw: unknown, label: string): Date => parseDateOnlyUtc(raw, label, (m) => new StoreSaleError(m));
 
-async function baseDecimals() {
-  const c = await prisma.currency.findFirst({ where: { isBase: true } });
-  return c?.decimalPlaces ?? 0;
-}
-
-function parseDate(raw: unknown, label: string): Date {
-  const d = new Date(String(raw ?? ""));
-  if (!raw || Number.isNaN(d.getTime())) throw new StoreSaleError(`${label} الزامی و باید معتبر باشد`);
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-async function fiscalPeriodOf(date: Date) {
-  const fp = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fp) throw new StoreSaleError("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fp.id);
-  return fp;
-}
+const fiscalPeriodOf = (date: Date) => resolveCurrentYearFiscalPeriod(date, (m) => new StoreSaleError(m));
 
 const userId = () => getRequestContext()?.userId ?? null;
 
@@ -42,7 +29,7 @@ export const returnTotals = (lines: { amount: any; vatAmount: any }[]) => {
 };
 
 /** جمع پرداخت‌های هر برگشت */
-export async function paidByReturn(returnIds: number[]): Promise<Map<number, number>> {
+async function paidByReturn(returnIds: number[]): Promise<Map<number, number>> {
   if (returnIds.length === 0) return new Map();
   const rows = await prisma.storePayment.groupBy({ by: ["returnId"], where: { returnId: { in: returnIds } }, _sum: { amount: true } });
   return new Map(rows.map((r) => [r.returnId, Number(r._sum.amount ?? 0)]));
@@ -168,7 +155,7 @@ export async function createStoreReturn(body: ReturnBody, allowPriceChange = fal
   const { shift, shiftDate } = await loadShift({ shiftId: body.shiftId, shiftDate: body.shiftDate }, date);
   const station = await loadStation(shift.stationId);
   const fp = await fiscalPeriodOf(date);
-  const dp = await baseDecimals();
+  const dp = await getBaseCurrencyDecimals();
   const saleId = Number(body.saleId) || null;
   await assertAfterLastDelivery(station.id, date);
   return prisma.$transaction(async (tx) => {
@@ -224,7 +211,7 @@ export async function updateStoreReturn(id: number, body: ReturnBody, allowPrice
   const station = await loadStation(ex.stationId);
   const fp = await fiscalPeriodOf(date);
   if (fp.id !== ex.fiscalPeriodId) throw new StoreSaleError("تاریخ برگشت را نمی‌توان به دوره‌ی مالی دیگری برد");
-  const dp = await baseDecimals();
+  const dp = await getBaseCurrencyDecimals();
   await assertAfterLastDelivery(ex.stationId, date);
   await prisma.$transaction(async (tx) => {
     let lines: CleanReturnLine[];
@@ -278,7 +265,7 @@ async function withStations<T extends { stationId: number }>(rows: T[]): Promise
   return rows.map((r) => ({ ...r, station: m.has(r.stationId) ? { title: m.get(r.stationId)! } : null }));
 }
 
-export function returnShape(r: any, paid = 0, withLines = false) {
+function returnShape(r: any, paid = 0, withLines = false) {
   const t = returnTotals(r.lines);
   const out: any = {
     id: r.id,
@@ -375,7 +362,7 @@ async function checkedPayment(body: PaymentBody) {
   const fp = await fiscalPeriodOf(date);
   const amount = Number(String(body.amount ?? "").replace(/,/g, ""));
   if (!Number.isFinite(amount) || amount <= 0) throw new StoreSaleError("مبلغ پرداخت باید عددی بزرگ‌تر از صفر باشد");
-  const dp = await baseDecimals();
+  const dp = await getBaseCurrencyDecimals();
   if (Math.abs(amount * 10 ** dp - Math.round(amount * 10 ** dp)) > 1e-6) throw new StoreSaleError(`مبلغ حداکثر ${dp} رقم اعشار دارد`);
   const bankAccountId = body.bankAccountId ? Number(body.bankAccountId) : null;
   if (body.bankAccountId && !bankAccountId) throw new StoreSaleError("حساب بانکی نامعتبر است");
@@ -437,14 +424,14 @@ export async function deleteStorePayment(id: number) {
   await prisma.storePayment.delete({ where: { id } });
 }
 
-export const PAYMENT_INCLUDE = {
+const PAYMENT_INCLUDE = {
   // StorePayment رابطه‌ی prisma با ایستگاه ندارد (فقط stationId)؛ عنوان ایستگاه با withStationTitles پر می‌شود
   cashBox: { select: { title: true } },
   bankAccount: { include: BANK_ACCOUNT_TITLE_INCLUDE },
   return: { select: { number: true, sale: { select: { number: true } }, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } } } },
 } as const;
 
-export function paymentShape(p: any) {
+function paymentShape(p: any) {
   return {
     id: p.id,
     number: p.number,

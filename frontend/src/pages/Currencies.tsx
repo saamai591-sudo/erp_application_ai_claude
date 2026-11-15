@@ -36,8 +36,7 @@ export default function Currencies() {
 }
 
 function CurrencyList() {
-  const { items, loading, error, remove, reload, create } = useCrud<Currency>("/currencies");
-  const navigate = useNavigate();
+  const { items, loading, error, remove, reload } = useCrud<Currency>("/currencies");
   return (
     <div>
       <div className="page-header">

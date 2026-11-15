@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
-import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
+import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
@@ -24,7 +24,7 @@ export default function DocumentConfirmation() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [, setSuccess] = useState<string | null>(null);
   const { hasPermission } = usePermissions();
   const canUnconfirm = hasPermission("accounting.operations.document-confirmation.unconfirm");
   const [revertDate, setRevertDate] = useState("");

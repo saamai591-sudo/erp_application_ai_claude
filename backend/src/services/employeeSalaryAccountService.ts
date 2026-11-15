@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { jalaliMonthRange, toJalaliYearMonth } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
+import { trimOrNull } from "../utils/inputParse";
 
 // حساب دریافت حقوق کارمند (منابع انسانی › پرسنلی › «حساب دریافت حقوق»): هر رکورد = «از ماه» (تقویم کاری) × نوع پرداخت حقوق × یکی از حساب‌های بانکیِ همان شخص.
 // ماه بر اساس تقویم کاری انتخاب می‌شود و مؤثرِ ماه M برای نوع T = آخرین رکورد همان نوع با «از ماه» ≤ M. هر حساب باید به یک نوع پرداخت وصل شود
@@ -12,11 +13,6 @@ export class SalaryAccountError extends Error {}
 
 const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 const monthLabel = (year: number, month: number) => `${MONTHS[month - 1]} ${year}`;
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
-
 export interface AccountLite {
   id: number;
   partyId: number;
@@ -83,7 +79,7 @@ async function buildData(b: SalaryAccountInput) {
   if (!acc) throw new SalaryAccountError("حساب بانکی را انتخاب کنید");
   if (acc.partyId !== emp.partyId) throw new SalaryAccountError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
   const fromMonthId = await loadCalendarMonthId(Number(b.year), Number(b.month));
-  return { emp, type, data: { employeeId: emp.id, paymentTypeId: type.id, fromMonthId, bankAccountId: acc.id, note: str(b.note) } };
+  return { emp, type, data: { employeeId: emp.id, paymentTypeId: type.id, fromMonthId, bankAccountId: acc.id, note: trimOrNull(b.note) } };
 }
 
 const DUP = "برای این کارمند، نوع پرداخت و ماه قبلاً حساب ثبت شده است";
@@ -212,8 +208,3 @@ export async function currentSalaryAccounts(employeeId: number) {
   return all.filter((r) => r.isCurrent).map((r) => ({ id: r.id, paymentTypeTitle: r.paymentTypeTitle, accountLabel: r.accountLabel, bankTitle: r.bankTitle, fromMonthTitle: r.fromMonthTitle }));
 }
 
-/** آیا حساب بانکیِ داده‌شده در رکورد حقوق کارمندی استفاده شده است؟ (برای پیام دوستانه‌ی حذف حساب از فرم شخص؛ پشتوانه‌ی دیتابیسی: FK با Restrict) */
-export async function salaryAccountUsedBy(bankAccountIds: number[]): Promise<string | null> {
-  const used = await prisma.employeeSalaryAccount.findFirst({ where: { bankAccountId: { in: bankAccountIds } }, select: { employee: { select: { party: { select: { detailTitle: true } } } } } });
-  return used ? used.employee.party.detailTitle : null;
-}

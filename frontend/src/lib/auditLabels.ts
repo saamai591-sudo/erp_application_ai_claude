@@ -18,7 +18,7 @@ export interface AuditEventView {
   ip: string | null;
 }
 
-export const AUDIT_ACTION_FA: Record<string, string> = {
+const AUDIT_ACTION_FA: Record<string, string> = {
   CREATE: "ایجاد",
   CREATE_MANY: "ایجاد گروهی",
   UPDATE: "ویرایش",

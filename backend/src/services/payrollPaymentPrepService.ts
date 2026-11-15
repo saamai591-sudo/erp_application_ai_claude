@@ -5,6 +5,8 @@ import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
 import { loadSalaryAccounts, accountLabel } from "./employeeSalaryAccountService";
 import { loadStructure } from "./fileStructureService";
 import { generateFiles, type GenResult } from "./fileGeneratorService";
+import { getBaseCurrencyDecimals } from "./baseCurrencyService";
+import { trimOrNull } from "../utils/inputParse";
 
 // حقوق و دستمزد › عملیات › «آماده‌سازی پرداخت». تنها نویسنده‌ی PayrollPaymentPrep/PayrollPaymentPrepLine همین سرویس است.
 // سند = ماه تقویم کاری + نوع پرداخت حقوق (+ شعبه‌ی سازمان برای نوع سازمانی، + ساختار فایل برای نوع «فایل دارد») + ردیف‌ها. هر ردیف یک آیتمِ نوع پرداخت
@@ -22,13 +24,8 @@ const r4 = (n: number) => Math.round(n * 1e4) / 1e4;
 const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 const monthLabel = (y: number, m: number) => `${MONTHS[m - 1]} ${y}`;
 const fullName = (p: { firstName: string | null; lastName: string | null; name: string | null } | null | undefined) => (p ? [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "" : "");
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
-
 export type ItemKind = "PAYROLL_FACTOR" | "LOAN_TYPE" | "NET_PAY";
-export const itemKey = (slipId: number, kind: string, refId: number | null | undefined) => `${slipId}:${kind}:${refId ?? 0}`;
+const itemKey = (slipId: number, kind: string, refId: number | null | undefined) => `${slipId}:${kind}:${refId ?? 0}`;
 
 export interface HeaderInput {
   year: number;
@@ -315,11 +312,6 @@ export interface PrepInput extends HeaderInput {
   lines: LineInput[];
 }
 
-async function baseDecimals(): Promise<number> {
-  const c = await prisma.currency.findFirst({ where: { isBase: true }, select: { decimalPlaces: true } });
-  return c?.decimalPlaces ?? 0;
-}
-
 function parseDay(v: unknown): Date {
   const d = new Date(`${String(v ?? "")}T00:00:00.000Z`);
   if (!v || isNaN(d.getTime())) throw new PrepError("تاریخ سند الزامی است");
@@ -329,7 +321,7 @@ function parseDay(v: unknown): Date {
 /** کنترل ردیف‌ها (داخل تراکنش و زیر قفل): وجود آیتم در فیش و نوع پرداخت، مجاز بودن کارمند، اعشار و سقف مبلغ قابل پرداخت */
 async function validateLines(db: any, h: HeaderInput, ctx: Awaited<ReturnType<typeof checkHeader>>, lines: LineInput[], prepId: number | null) {
   if (!Array.isArray(lines) || lines.length === 0) throw new PrepError("هیچ ردیفی برای ذخیره وجود ندارد؛ «لود اطلاعات» را بزنید");
-  const dec = await baseDecimals();
+  const dec = await getBaseCurrencyDecimals();
   const seen = new Set<string>();
   for (const l of lines) {
     const k = itemKey(Number(l.slipId), l.kind, l.refId);
@@ -388,7 +380,7 @@ export async function createPrep(b: PrepInput, userId: number | null): Promise<{
         data: {
           number,
           date,
-          description: str(b.description),
+          description: trimOrNull(b.description),
           year: b.year,
           month: b.month,
           paymentTypeId: ctx.type.id,
@@ -419,7 +411,7 @@ export async function updatePrep(id: number, b: PrepInput): Promise<void> {
         where: { id },
         data: {
           date,
-          description: str(b.description),
+          description: trimOrNull(b.description),
           year: b.year,
           month: b.month,
           paymentTypeId: ctx.type.id,

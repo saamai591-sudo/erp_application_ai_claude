@@ -5,6 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { missingMonthMessage } from "../services/workCalendarService";
 import { employeeIdsInPeriod } from "../services/employmentStatusService";
+import { getBaseCurrencyDecimals } from "../services/baseCurrencyService";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ورود گروهیِ مقدار عوامل «ورود دستی» برای همه‌ی کارمندان یک ماه.
 // ستون‌ها = عامل‌هایی که روش مؤثر آن‌ها در پایان ماه انتخاب‌شده «ورود دستی» است؛ فرمت مجاز را نوع پارامتر عامل تعیین می‌کند:
@@ -19,11 +20,6 @@ export class DErr extends Error {}
 function fail(res: Response, e: any) {
   if (e instanceof DErr) return res.status(400).json({ error: e.message });
   return res.status(400).json({ error: e?.message || "خطا در ثبت اطلاعات" });
-}
-
-async function baseDecimals(): Promise<number> {
-  const c = await prisma.currency.findFirst({ where: { isBase: true }, select: { decimalPlaces: true } });
-  return c?.decimalPlaces ?? 0;
 }
 
 /** نوع محاسبه‌ی انتخاب‌شده (پیش‌فرض: نوع پایه) */
@@ -61,7 +57,7 @@ router.get("/payroll-data-entry", can(`${F}.view`), async (req, res) => {
     if (calMsg) throw new DErr(calMsg);
     const range = jalaliMonthRange(year, month);
     const calcType = await resolveType(req.query.calcTypeId);
-    const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
+    const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), getBaseCurrencyDecimals()]);
     // کارمندانی که دوره‌ی همکاری‌شان با ماه هم‌پوشانی دارد
     const inPeriod = await employeeIdsInPeriod(range.start, range.end);
     const emps = await prisma.employee.findMany({
@@ -125,7 +121,7 @@ export async function prepareDataEntry(yearRaw: unknown, monthRaw: unknown, calc
   if (calMsg) throw new DErr(calMsg);
   const range = jalaliMonthRange(year, month);
   const calcType = await resolveType(calcTypeRaw);
-  const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
+  const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), getBaseCurrencyDecimals()]);
   return { year, month, range, calcType, columns, decimals };
 }
 export type DataEntryContext = Awaited<ReturnType<typeof prepareDataEntry>>;
@@ -170,7 +166,7 @@ export async function saveDataEntries(ctx: DataEntryContext, entries: { employee
  * کارمند در این ماه همکاری داشته باشد و حقوق همین نوع محاسبه برای هیچ‌یک از کارمندان انتخاب‌شده محاسبه نشده باشد (قفل). فقط ورودی‌های
  * عامل‌های «ورود دستی» حذف می‌شود، پس مقدارهای ارسال‌شده از تردد هرگز با این کار پاک نمی‌شود. تعداد ردیف حذف‌شده برگردانده می‌شود.
  */
-export async function deleteDataEntries(ctx: DataEntryContext, employeeIdsRaw: unknown, componentIdsRaw: unknown): Promise<number> {
+async function deleteDataEntries(ctx: DataEntryContext, employeeIdsRaw: unknown, componentIdsRaw: unknown): Promise<number> {
   const { year, month, range, calcType, columns } = ctx;
   const employeeIds = [...new Set((Array.isArray(employeeIdsRaw) ? employeeIdsRaw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   const componentIds = [...new Set((Array.isArray(componentIdsRaw) ? componentIdsRaw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];

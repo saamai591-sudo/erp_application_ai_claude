@@ -8,6 +8,8 @@ import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValida
 import { findFormPrefix } from "../authz/registry";
 import { cleanOpeningGuarantees, syncOpeningGuarantees, deleteOpeningGuarantees, loadOpeningGuarantees, openingGuaranteeCounts } from "../services/guaranteeOpeningService";
 import { getGuaranteeAccountingView, saveGuaranteeAccountingDetails } from "../services/guaranteeJournalEntryService";
+import { getBaseCurrency } from "../services/baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 const FORM = findFormPrefix("treasury-openings");
 
@@ -67,17 +69,6 @@ interface OpeningBody {
   updatedAt?: string;
 }
 
-function partyDisplay(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
-async function getBaseCurrency() {
-  const c = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!c) throw new Error("ارز پایه تعریف نشده است");
-  return c;
-}
-
 async function loadOpeningCheques(fiscalPeriodId: number) {
   // fiscalPeriodId صراحتاً در where است، پس فیلتر خودکار دوره‌ی مالی دخالتی ندارد
   return prisma.chequeItem.findMany({
@@ -127,7 +118,7 @@ async function serializeOpening(o: any) {
     dueDate: c.dueDate,
     amount: Number(c.amount),
     partyId: c.partyId,
-    partyDisplay: partyDisplay(c.party),
+    partyDisplay: partyTitle(c.party),
     status: c.status,
     description: c.description,
     parentChequeId: c.parentChequeId,
@@ -158,7 +149,7 @@ async function serializeOpening(o: any) {
     })),
     pettyCashLines: o.pettyCashLines.map((l: any) => ({
       custodianId: l.custodianId,
-      custodianTitle: partyDisplay(l.custodian?.party),
+      custodianTitle: partyTitle(l.custodian?.party),
       custodianCode: l.custodian?.detailCode ?? "",
       pettyCashId: l.pettyCashId,
       pettyCashTitle: l.pettyCash.title,
@@ -436,7 +427,7 @@ async function syncPettyCashLines(tx: any, openingId: number, incoming: { pettyC
   const byId = new Map<number, (typeof incoming)[number]>(incoming.map((l) => [l.custodianId, l]));
   for (const e of existing) {
     const l = byId.get(e.custodianId);
-    const label = `تنخواه‌ها — تنخواه‌دار ${partyDisplay(e.custodian?.party)} (${e.custodian?.pettyCash?.title ?? ""})`;
+    const label = `تنخواه‌ها — تنخواه‌دار ${partyTitle(e.custodian?.party)} (${e.custodian?.pettyCash?.title ?? ""})`;
     if (!l) throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل حذف نیست`);
     if (Math.abs(l.balance - Number(e.balance)) > 0.005 || Math.abs(l.baseBalance - Number(e.baseBalance)) > 0.005) {
       throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل ویرایش نیست`);

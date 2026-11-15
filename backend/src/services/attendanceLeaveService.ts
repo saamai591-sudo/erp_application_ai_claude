@@ -17,7 +17,7 @@ const DAY_MS = 86400000;
 const MAX_REQUEST_DAYS = 366;
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
-export const leaveVarKey = (id: number) => `LV${id}`;
+const leaveVarKey = (id: number) => `LV${id}`;
 
 // ───────────────────────── نوع مرخصی ─────────────────────────
 
@@ -88,7 +88,7 @@ export async function saveLeaveType(body: any, id?: number) {
 }
 
 /** عامل‌هایی که فرمولشان به متغیر این نوع مرخصی ارجاع می‌دهد */
-export async function factorsUsingLeaveType(id: number): Promise<string[]> {
+async function factorsUsingLeaveType(id: number): Promise<string[]> {
   const re = new RegExp(`\\[(V|T):${leaveVarKey(id)}(:[A-Za-z_]+)?\\]`, "i");
   return formulaUsers(re);
 }
@@ -193,7 +193,7 @@ export async function assertShiftAssigned(employeeId: number, fromDate: Date, wh
  * کنترل‌های «شیفت و حضور»: (۱) مرخصی ساعتی باید با شروع و پایانش داخل بازه‌های کاریِ شیفتِ همان روز (با اعمال استثنای روز) بیفتد (وسط بازه‌ی استراحت/بین دو بازه مجاز است
  * ولی شروع و پایان باید داخل بازه‌ی کاری باشند)؛ (۲) مرخصی با ترددِ ثبت‌شده تداخل نداشته باشد: ساعتی با حضورِ جفت‌ترددها و ترددِ منفردِ داخل بازه، روزانه با هر تردد در تاریخ‌هایش.
  */
-export async function assertShiftAndPresence(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) {
+async function assertShiftAndPresence(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) {
   // مرخصی فقط داخل بازه‌ی شیفتِ کارمند
   await assertShiftAssigned(q.employeeId, q.fromDate, "مرخصی");
   const f = dayNum(q.fromDate), t = dayNum(q.toDate);

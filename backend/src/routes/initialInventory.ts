@@ -11,6 +11,7 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, setLineAmount, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { getBaseCurrencyDecimalsStrict } from "../services/baseCurrencyService";
 
 const FORM = findFormPrefix("warehousing-initial-inventory");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -61,11 +62,6 @@ function computeAmount(quantity: number, unitCost: number, decimalPlaces: number
 // ارز پایه (isBase=true) طبق همان الگوی مورد استفاده در بقیه‌ی ماژول‌های پروژه (سند حسابداری،
 // افتتاحیه/اختتامیه، بانکداری و ...) پیدا می‌شود؛ اگر ارز پایه تعریف نشده باشد، خطای واضح داده می‌شود
 // تا سند ناقص/نادرست ذخیره نشود.
-async function getBaseCurrencyDecimalPlaces(): Promise<number> {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است؛ ابتدا یک ارز را به‌عنوان ارز پایه مشخص کنید");
-  return baseCurrency.decimalPlaces;
-}
 
 async function validateLines(lines: LineInput[], existingSerialIds?: Set<number>) {
   if (!Array.isArray(lines) || lines.length === 0) {
@@ -291,7 +287,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req: AuthedRequest, res) => {
           throw new Error(`این سند تایید حسابداری شده است؛ کالا/واحد/مقدار ردیف ${idx + 1} قابل تغییر نیست`);
         }
       }
-      const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+      const decimalPlaces = await getBaseCurrencyDecimalsStrict();
       await prisma.$transaction(async (tx) => {
         for (const [idx, l] of sortedExisting.entries()) {
           const unitCost = Number((body.lines[idx] as any).unitCost) || 0;
@@ -395,7 +391,7 @@ export async function updateInitialInventoryAccounting(id: number, lines: { id: 
   // طبق تصمیم صریح کاربر، «تایید انبار» فقط ویرایش اطلاعات مقداری را قفل می‌کند، نه مبلغی — این تابع
   // فقط unitCost/amount می‌نویسد (هیچ مقداری تغییر نمی‌کند)، پس assertWarehouseOpenForDate عمداً اینجا
   // فراخوانی نمی‌شود؛ دقیقاً هم‌قانون شاخه‌ی FINALIZED در PUT بالا.
-  const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+  const decimalPlaces = await getBaseCurrencyDecimalsStrict();
 
   const existingLineIds = new Set(existing.lines.map((l: any) => l.id));
   for (const [idx, l] of lines.entries()) {

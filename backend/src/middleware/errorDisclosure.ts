@@ -40,7 +40,7 @@ const INTERNAL_PATTERNS: RegExp[] = [
 ];
 
 /** آیا این متن شبیه یک خطای داخلی (و نه پیام کسب‌وکاری) است؟ */
-export function looksInternal(text: string): boolean {
+function looksInternal(text: string): boolean {
   return INTERNAL_PATTERNS.some((re) => re.test(text));
 }
 

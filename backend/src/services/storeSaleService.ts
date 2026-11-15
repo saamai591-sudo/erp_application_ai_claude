@@ -1,13 +1,15 @@
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveCurrentYearFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { getVatRatePercentForDate } from "./accountingSettingsService";
 import { computePrice, findEffectiveStationPriceListId, loadItemPricing } from "./salesPriceService";
 import { assertNoNegativeStockAfterChange } from "./warehouseStockService";
 import { assertWarehouseOpenForDate } from "./warehouseConfirmationService";
 import { displayDate } from "../utils/dateDisplay";
 import { interpretBarcode } from "./barcodeInterpretationService";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
+import { parseDateOnlyUtc } from "../utils/inputParse";
 
 // فروش فروشگاهی › «فروش فروشگاهی» — تنها محل قواعد (سند مستقل؛ بدون سند حسابداری و بدون حواله انبار).
 // • ایستگاه فعال؛ تاریخ داخل دوره‌ی مالی جاری؛ برای فروش کالا انبارِ ایستگاه باید در آن تاریخ باز (تاییدنشده) باشد.
@@ -20,7 +22,6 @@ import { interpretBarcode } from "./barcodeInterpretationService";
 export class StoreSaleError extends Error {}
 
 const EPS = 1e-6;
-const roundTo = (v: number, dp: number) => Math.round(v * 10 ** dp) / 10 ** dp;
 const dayStr = (d: Date) => d.toISOString().slice(0, 10);
 
 export interface StoreSaleLineInput {
@@ -48,11 +49,7 @@ async function baseCurrency() {
   return c;
 }
 
-function parseDate(raw: unknown): Date {
-  const d = new Date(String(raw ?? ""));
-  if (!raw || Number.isNaN(d.getTime())) throw new StoreSaleError("تاریخ فروش الزامی و باید معتبر باشد");
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
+const parseDate = (raw: unknown): Date => parseDateOnlyUtc(raw, "تاریخ فروش", (m) => new StoreSaleError(m));
 
 export async function loadStation(id: unknown) {
   const station = Number(id) ? await prisma.salesStation.findUnique({ where: { id: Number(id) }, include: { warehouse: true } }) : null;
@@ -170,7 +167,7 @@ export async function cleanLines(lines: StoreSaleLineInput[] | undefined, statio
       unitPrice = Number(l.unitPrice);
       if (!(unitPrice >= 0)) throw new StoreSaleError(`فی ${row} نامعتبر است`);
     }
-    const amount = roundTo(quantity * unitPrice, dp);
+    const amount = roundToCurrencyDecimals(quantity * unitPrice, dp);
     const vatAmount = computeLineVat(amount, 0, resolveVatRatePercent(item, defaultVat), dp);
     out.push({ goodsItemId: item.id, unitId: item.mainUnitId, quantity, unitPrice, amount, vatAmount, priceListId, listPrice, description: l.description ? String(l.description).trim() || null : null, barcode });
   }
@@ -194,17 +191,12 @@ export async function resolveCustomer(raw: unknown, station: Station) {
   return c;
 }
 
-async function fiscalPeriodOf(date: Date) {
-  const fp = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fp) throw new StoreSaleError("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fp.id);
-  return fp;
-}
+const fiscalPeriodOf = (date: Date) => resolveCurrentYearFiscalPeriod(date, (m) => new StoreSaleError(m));
 
 const userId = () => getRequestContext()?.userId ?? null;
 
 /** هر فروش فقط وقتی قابل ویرایش/حذف است که تحویل‌نشده و بدون دریافت باشد */
-export async function assertSaleEditable(id: number) {
+async function assertSaleEditable(id: number) {
   const s = await prisma.storeSale.findUnique({ where: { id }, select: { id: true, deliveryStatus: true, creditDeclaredAt: true } });
   if (!s) throw new StoreSaleError("فروش یافت نشد");
   if (s.creditDeclaredAt) throw new StoreSaleError("برای این فروش «نسیه» ثبت شده است؛ ابتدا نسیه را لغو کنید");

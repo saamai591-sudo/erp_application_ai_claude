@@ -7,7 +7,6 @@ import { RefreshButton } from "../components/RefreshButton";
 import { InfoHint } from "../components/InfoHint";
 import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
 import { getAssetGroupReviewSnapshot, setAssetGroupReviewSnapshot } from "../lib/assetGroupReviewCache";
-import { formatAmountFa } from "../lib/formatAmount";
 import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefaultDate";
 import { useReviewTabLoader, useReviewTabActivation, useReviewTabViewState, serializeForDepsKey } from "../lib/useReviewTabLoader";
 import { api } from "../lib/api";
@@ -15,6 +14,7 @@ import { useTabs } from "../lib/TabsContext";
 import { usePermissions } from "../lib/usePermissions";
 import { showError } from "../lib/toast";
 import { ColumnFilterType } from "../components/DataTable";
+import { SignedCell } from "../components/reviewColumns";
 
 // گزارش «مرور گروه دارایی» (دارایی ثابت › گزارش) — هم‌الگوی «مرور تنخواه» با دو تب زنجیره‌ای: «گروه حسابداری دارایی» و «دارایی».
 // انتخاب گروه‌ها تب «دارایی» را فیلتر می‌کند. هر مبلغ با تاریخ سندش در بازه می‌افتد و رکورد وسط بازه کامل می‌آید (برای تطبیق با «مرور حسابها»)؛
@@ -32,11 +32,6 @@ const INFO_TEXT =
   "در تب «گروه حسابداری دارایی» می‌توانید یک یا چند گروه را انتخاب کنید تا تب «دارایی» فقط پلاک‌های همان گروه‌ها را نشان دهد. " +
   "هر مبلغ با تاریخ سندی که برایش صادر می‌شود در بازه می‌افتد (افزایش: سند تحصیل، استهلاک دوره: پایان دوره، نقل و انتقال: تاریخ سند تغییر گروه) و " +
   "رکورد وسط بازه کامل می‌آید. پلاکی که در بازه گروهش عوض شده در دو ردیف می‌آید: گروه مبدا (نقل و انتقال منفی) و گروه مقصد (مثبت).";
-
-function SignedCell({ value }: { value: number }) {
-  const negative = value < 0;
-  return <span className={negative ? "olap-amount-negative" : undefined}>{negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value)}</span>;
-}
 
 function numCol<T extends Figures>(header: string, field: keyof Figures): BalanceTableColumn<T> {
   return {

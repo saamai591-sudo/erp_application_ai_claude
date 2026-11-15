@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { HrError, checkAssignmentRefs } from "./employeeAssignmentService";
 import { displayDate } from "../utils/dateDisplay";
 import { getPeriods, periodContains } from "./employmentStatusService";
+import { parseIsoDay } from "../utils/inputParse";
 
 // اصلاح سوابق انتصاب کارمند: ویرایش/حذف انتصاب (تنها محل این قواعد؛ مسیرهای employees فقط صدا می‌زنند). سابقه‌ی وضعیت و دوره‌های همکاری = services/employmentStatusService.ts.
 //  • انتصابی که برای کارمند «حکمی با تاریخ اعمال ≥ تاریخ شروع آن انتصاب» دارد قابل ویرایش و حذف نیست (حکم هر وضعیتی).
@@ -12,14 +13,10 @@ const DAY = 86400000;
 const day = (d: Date | null | undefined) => displayDate(d);
 const sameDay = (a: Date, b: Date) => a.getTime() === b.getTime();
 
-function parseDay(v: unknown, label: string): Date {
-  const d = new Date(`${String(v ?? "")}T00:00:00.000Z`);
-  if (!v || isNaN(d.getTime())) throw new HrError(`${label} نامعتبر یا خالی است`);
-  return d;
-}
+const parseDay = (v: unknown, label: string): Date => parseIsoDay(v, label, (m) => new HrError(m), { emptyMessage: `${label} نامعتبر یا خالی است`, invalidMessage: `${label} نامعتبر یا خالی است` }) as Date;
 
 /** پیام قفل یک انتصاب: وجود حکمی (هر وضعیت) با تاریخ اعمال ≥ تاریخ شروع انتصاب */
-export function lockMessageFor(decree: { number: number; effectiveDate: Date } | null): string | null {
+function lockMessageFor(decree: { number: number; effectiveDate: Date } | null): string | null {
   return decree
     ? `برای این کارمند حکم شماره ${decree.number} با تاریخ اعمال ${day(decree.effectiveDate)} (همان تاریخ شروع این انتصاب یا بعد از آن) ثبت شده است؛ ویرایش و حذف انتصاب ممکن نیست`
     : null;

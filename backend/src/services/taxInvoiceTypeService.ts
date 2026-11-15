@@ -20,7 +20,6 @@ export const TAX_SOURCES: { key: "SALES_INVOICE" | "STORE_SALE"; title: string }
 const SOURCE_KEYS = new Set(TAX_SOURCES.map((s) => s.key as string));
 const BUYER_FA: Record<string, string> = { INDIVIDUAL: "حقیقی", LEGAL: "حقوقی" };
 
-const day = (d: Date) => d.toISOString().slice(0, 10);
 const digits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 const hasEconomicCodeValue = (v: unknown) => /^\d{11}$|^\d{14}$/.test(digits(v));
 

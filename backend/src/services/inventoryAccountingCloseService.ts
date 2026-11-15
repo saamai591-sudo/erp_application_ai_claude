@@ -4,6 +4,7 @@ import { getQuantityCloseContext } from "./warehouseQuantityCloseService";
 import { computeItemKardex, pricingDocumentWhere, USER_PRICED_TYPES, DOC_TYPE_FA } from "./goodsPricingService";
 import { getLineAmounts, setLineAmount } from "./documentItemAmountService";
 import { lockOpeningYearExclusive } from "./inventoryAccountingGuards";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
 
 // =========================================================================
 // «بستن حسابداری موجودی» و «برگشت بستن حسابداری موجودی» (مدیریت موجودی و انبار › عملیات پایان دوره).
@@ -32,11 +33,6 @@ interface LockedWarehouse {
   implementationDate: Date | null;
 }
 
-function round(value: number, decimalPlaces: number): number {
-  const f = Math.pow(10, decimalPlaces);
-  return Math.round(value * f) / f;
-}
-
 function namesList(names: string[], max = 8): string {
   return names.length <= max ? names.join("، ") : `${names.slice(0, max).join("، ")} و ${names.length - max} مورد دیگر`;
 }
@@ -49,13 +45,13 @@ function namesList(names: string[], max = 8): string {
 export function allocateByQuantity(total: number, rows: { id: number; qty: number }[], decimalPlaces: number): Map<number, number> {
   const sumQty = rows.reduce((s, r) => s + r.qty, 0);
   const sorted = [...rows].sort((a, b) => b.qty - a.qty || a.id - b.id);
-  const amt = new Map<number, number>(sorted.map((r) => [r.id, sumQty > 0 ? round((total * r.qty) / sumQty, decimalPlaces) : 0]));
-  let diff = round(total - Array.from(amt.values()).reduce((s, v) => s + v, 0), decimalPlaces);
+  const amt = new Map<number, number>(sorted.map((r) => [r.id, sumQty > 0 ? roundToCurrencyDecimals((total * r.qty) / sumQty, decimalPlaces) : 0]));
+  let diff = roundToCurrencyDecimals(total - Array.from(amt.values()).reduce((s, v) => s + v, 0), decimalPlaces);
   for (const r of sorted) {
     if (Math.abs(diff) < Math.pow(10, -decimalPlaces) / 2) break;
     const cur = amt.get(r.id)!;
-    const next = round(Math.max(0, cur + diff), decimalPlaces);
-    diff = round(diff - (next - cur), decimalPlaces);
+    const next = roundToCurrencyDecimals(Math.max(0, cur + diff), decimalPlaces);
+    diff = roundToCurrencyDecimals(diff - (next - cur), decimalPlaces);
     amt.set(r.id, next);
   }
   return amt;
@@ -68,7 +64,7 @@ export function allocateByQuantity(total: number, rows: { id: number; qty: numbe
  * بستن، هیچ تغییر قیمتی در آن سال مجاز نیست؛ پس دوره‌ی قیمت‌گذاری‌نشده برای همیشه بی‌مبلغ می‌ماند. اگر آخرین دوره‌ی گزارشگری تا
  * پایان سال نرسد و بعد از آن گردشی باشد، آن گردش هرگز قیمت‌گذاری نمی‌شود و بستن رد می‌شود. null = مشکلی نیست.
  */
-export async function getYearEndValuationProblem(fiscal: { id: number; fromDate: Date; toDate: Date; title: string }, db: any = prisma): Promise<{ message: string; missingCount: number } | null> {
+async function getYearEndValuationProblem(fiscal: { id: number; fromDate: Date; toDate: Date; title: string }, db: any = prisma): Promise<{ message: string; missingCount: number } | null> {
   const rows = await db.inventoryDocumentLine.findMany({
     where: { document: pricingDocumentWhere(fiscal.fromDate, { lte: fiscal.toDate }) },
     select: { goodsItemId: true, document: { select: { date: true } } },
@@ -250,7 +246,7 @@ export async function closeInventoryAccounting(userId: number | null): Promise<A
             `مانده‌ی تعدادیِ کاردکس کالای «${itemById.get(itemId)!.title}» (${k.state.qty}) با مجموع ردیف‌های موجودی اول دوره‌ی انبارها (${sumQty}) برابر نیست؛ اسناد را بررسی کنید`
           );
         }
-        const total = round(k.state.value, k.decimalPlaces);
+        const total = roundToCurrencyDecimals(k.state.value, k.decimalPlaces);
         if (total < -k.epsilon) {
           throw new Error(`ارزش پایان دوره‌ی کالای «${itemById.get(itemId)!.title}» منفی (${total}) محاسبه شد؛ مبلغ اسناد را بررسی کنید`);
         }
@@ -268,7 +264,7 @@ export async function closeInventoryAccounting(userId: number | null): Promise<A
         await setLineAmount(tx, { lineId, newAmount: value, priceType: "ACCOUNTING_CLOSING", effectiveDate: current.toDate, createdById: userId });
         totalAmount += value;
       }
-      totalAmount = round(totalAmount, decimalPlaces);
+      totalAmount = roundToCurrencyDecimals(totalAmount, decimalPlaces);
 
       // ۶-ب) تایید اسناد «موجودی اول دوره»ی دوره‌ی بعد — بعد از مبلغ‌دارشدن، مثل «تایید حسابداری» یک سند موجودی اول دوره به FINALIZED می‌روند
       // (تا مبلغ در فرم/گزارش‌ها نمایش داده شود و دیگر «ثبت‌شده» نمانند). fiscalPeriodId صریح است چون این اسناد در دوره‌ی بعدند.

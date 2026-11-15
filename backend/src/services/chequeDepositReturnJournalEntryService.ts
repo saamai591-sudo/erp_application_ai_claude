@@ -4,8 +4,10 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
-import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { EffectiveTreasurySettings } from "./treasurySettingService";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // صدور سند حسابداری «برگشت از واگذاری چک» (ChequeDepositReturn) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به بانک)،
@@ -20,10 +22,6 @@ import { findIssuingDocType } from "./documentTypeService";
 // چک همیشه با ارز پایه است، پس همه‌ی ردیف‌ها به ارز پایه ثبت می‌شوند.
 // =========================================================================
 
-function partyDisplayName(p: any): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 export async function issueChequeDepositReturnJournalEntry(returnId: number) {
   const doc = await prisma.chequeDepositReturn.findUnique({
     where: { id: returnId },
@@ -34,8 +32,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
   if (doc.status !== "APPROVED") throw new Error("فقط برای سند برگشت از واگذاریِ «تایید»شده می‌توان سند حسابداری صادر کرد");
   if (doc.lines.length === 0) throw new Error("سند برگشت از واگذاری چکی ندارد");
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   const treasurySettings = new EffectiveTreasurySettings(await prisma.treasuryAccountSetting.findMany({ include: { account: true } }) as any[]);
   const description = `بابت برگشت چک از واگذاری ${doc.number} ${formatJalaliDateForMessage(doc.date)}`.trim();
@@ -83,7 +80,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
       debit: Number(cheque.amount),
       credit: 0,
       fxRate: 1,
-      description: `${description} — چک ${cheque.number} ${partyDisplayName(cheque.party)}`.trim(),
+      description: `${description} — چک ${cheque.number} ${partyTitle(cheque.party)}`.trim(),
     });
   }
 

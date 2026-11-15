@@ -24,7 +24,7 @@ const GROUP_INCLUDE = {
   printers: { select: { station: { select: { id: true, title: true } } } },
 } as const;
 
-export function printGroupShape(g: any) {
+function printGroupShape(g: any) {
   const stations = new Map<number, string>();
   for (const p of g.printers ?? []) stations.set(p.station.id, p.station.title);
   return {
@@ -140,7 +140,7 @@ export async function syncStationPrinters(tx: any, stationId: number, printers: 
 
 // ───────────────────────── کار چاپ ─────────────────────────
 
-export function jobShape(j: any) {
+function jobShape(j: any) {
   return { id: j.id, printerName: j.printerName, kind: j.kind as "INVOICE" | "ORDER", status: j.status as "QUEUED" | "CLAIMED" | "PRINTED" | "FAILED", errorMessage: j.errorMessage ?? "", title: j.title, createdAt: j.createdAt, doneAt: j.doneAt ?? null };
 }
 
@@ -291,7 +291,7 @@ export async function printSaleOrder(saleId: number, mode: "NEW" | "ALL") {
 // ───────────────────────── چرخه‌ی کار چاپ با برنامه‌ی صندوق ─────────────────────────
 
 /** مهلت (تنبل): تحویل‌شده به کلاینت بدون نتیجه ⇒ وضعیت نامعلوم */
-export async function expirePrintJobs() {
+async function expirePrintJobs() {
   await prisma.printJob.updateMany({ where: { status: { in: ["QUEUED", "CLAIMED"] }, createdAt: { lt: new Date(Date.now() - RESULT_TIMEOUT_MS) } }, data: { status: "FAILED", doneAt: new Date(), errorMessage: "نتیجه‌ی چاپ نرسید؛ وضعیت نامعلوم است (چاپگر را بررسی کنید)" } });
 }
 

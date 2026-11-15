@@ -26,7 +26,7 @@ function below1000(n: number): string {
 }
 
 /** عدد صحیح نامنفی به حروف («صفر» برای ۰) */
-export function integerToPersianWords(value: bigint): string {
+function integerToPersianWords(value: bigint): string {
   if (value === 0n) return "صفر";
   const groups: number[] = [];
   let v = value;

@@ -15,37 +15,6 @@ export interface ListGoodsItemsForDocNatureOptions {
   activeOnly?: boolean;
 }
 
-/**
- * لیست کالاهای (kind=GOODS) مجاز برای بارگذاری در سندی با ماهیت/نوع مشخص.
- * اگر چنین ماهیت/نوعی در ماتریس تعریف نشده باشد، آرایه‌ی خالی برمی‌گرداند (نه خطا) —
- * چون فراخوان (route ماژول‌های آینده) باید خودش تصمیم بگیرد این حالت را چطور به کاربر نشان دهد.
- */
-export async function listGoodsItemsForDocNature(
-  direction: WarehouseDocDirection,
-  type: string,
-  options: ListGoodsItemsForDocNatureOptions = {}
-) {
-  const allowedGoodsTypes = getAllowedGoodsTypes(direction, type);
-  if (!allowedGoodsTypes || allowedGoodsTypes.length === 0) return [];
-
-  const activeOnly = options.activeOnly !== false;
-
-  return prisma.goodsItem.findMany({
-    where: {
-      kind: "GOODS" as any,
-      ...(activeOnly ? { isActive: true } : {}),
-      accountingGroup: { goodsType: { in: allowedGoodsTypes as any } },
-    },
-    include: {
-      goodsGroup: true,
-      mainUnit: true,
-      weightUnit: true,
-      accountingGroup: true,
-    },
-    orderBy: { id: "desc" },
-  });
-}
-
 /** آیا خود این کالا (بر اساس goodsType گروه حسابداری‌اش) در سندی با این ماهیت/نوع قابل بارگذاری است؟ */
 export async function isGoodsItemAllowedForDocNature(goodsItemId: number, direction: WarehouseDocDirection, type: string): Promise<boolean> {
   const allowedGoodsTypes = getAllowedGoodsTypes(direction, type);

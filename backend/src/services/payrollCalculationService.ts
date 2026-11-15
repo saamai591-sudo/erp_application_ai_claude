@@ -48,7 +48,7 @@ export const METHOD_FA: Record<string, string> = {
   ATTENDANCE: "ورود از سیستم تردد",
   TREASURY: "ورود از سیستم خزانه‌داری",
 };
-export const INPUT_METHODS: Method[] = ["MANUAL", "ATTENDANCE", "TREASURY"];
+const INPUT_METHODS: Method[] = ["MANUAL", "ATTENDANCE", "TREASURY"];
 
 const DECREE_VALUE_FA: Record<string, string> = { MONTHLY_AMOUNT: "ماهانه", DAILY_AMOUNT: "روزانه", HOURLY_AMOUNT: "ساعتی", PERCENT: "درصد" };
 

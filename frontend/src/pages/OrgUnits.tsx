@@ -31,7 +31,6 @@ function OrgUnitList() {
   const cacheKey = "/org-units";
   const [items, setItems] = usePersistedState<OrgUnit[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/org-units").then(setItems).catch((e) => setError(e.message));

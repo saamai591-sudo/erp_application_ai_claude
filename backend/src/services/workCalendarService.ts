@@ -7,7 +7,7 @@ import { jalaliMonthRange } from "../utils/jalaliDate";
 
 export class WorkCalendarError extends Error {}
 
-export const MAX_DAILY_MINUTES = 23 * 60 + 59;
+const MAX_DAILY_MINUTES = 23 * 60 + 59;
 const MAX_MONTH_MINUTES = 31 * 24 * 60;
 
 export interface MonthRow {

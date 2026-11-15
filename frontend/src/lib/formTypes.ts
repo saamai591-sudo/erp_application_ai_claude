@@ -20,7 +20,7 @@ export interface FormTypeBehavior {
   labelTitle: { withCreate: string; withoutCreate: string };
 }
 
-export const FORM_TYPE_BEHAVIOR: Record<FormType, FormTypeBehavior> = {
+const FORM_TYPE_BEHAVIOR: Record<FormType, FormTypeBehavior> = {
   list: {
     showListIcon: true,
     labelTitle: { withCreate: "باز کردن فرم جدید در تب جدید", withoutCreate: "باز کردن فهرست در تب جدید" },
@@ -44,7 +44,7 @@ export interface FormTypeSource {
  * نوع فرم: اگر صریحاً داده شده همان؛ وگرنه از ساختار استنتاج می‌شود — فرمی که «جدید» دارد فهرستی (list) است و فرمی که «جدید» ندارد
  * (برچسبش همان تنها صفحه را باز می‌کند و آیکن فهرست تکراری می‌شد) عملیاتی (operational). گزارش‌ها باید صریحاً type: "report" بگیرند.
  */
-export function resolveFormType(item: FormTypeSource): FormType {
+function resolveFormType(item: FormTypeSource): FormType {
   return item.type ?? (item.create ? "list" : "operational");
 }
 

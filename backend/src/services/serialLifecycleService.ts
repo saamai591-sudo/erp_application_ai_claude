@@ -10,7 +10,7 @@ export type SerialLifecycleBucket = "INBOUND" | "OUTBOUND" | "RETURN_OF_RECEIPT"
 // طبق تصمیم صریح کاربر: «بدون مبنا» برای اسناد برگشتی در این کدبیس اصلاً وجود ندارد (سطر مبنا همیشه
 // الزامی است)، پس فقط حالت «با مبنا» مستندِ «انتخاب سریال و بچ» پیاده می‌شود. انبارگردانی هم طبق تصمیم
 // کاربر از این چرخه‌ی عمر کنار گذاشته شده (UNRESTRICTED — بدون فیلتر وضعیت، بدون تغییر وضعیت).
-export const SERIAL_LIFECYCLE_BUCKETS: Record<InventoryDocumentType, SerialLifecycleBucket> = {
+const SERIAL_LIFECYCLE_BUCKETS: Record<InventoryDocumentType, SerialLifecycleBucket> = {
   INITIAL_INVENTORY: "INBOUND",
   WAREHOUSE_RECEIPT: "INBOUND",
   PRODUCTION_RECEIPT: "INBOUND",
@@ -48,7 +48,7 @@ const TRANSITIONS: Record<Exclude<SerialLifecycleBucket, "UNRESTRICTED">, { from
 // نام فیلد سطر مبنا برای هر نوع سندی که «با مبنا» است — پیکر سریال این نوع اسناد، فقط سریال‌های
 // استفاده‌شده در همان سطر مبنا (به‌علاوه‌ی فیلتر وضعیت from همان باکت، که به‌طور طبیعی سریال‌های
 // قبلاً مصرف‌شده را کنار می‌گذارد چون وضعیت‌شان دیگر from نیست) را نشان می‌دهد.
-export const SOURCE_LINE_FIELD: Partial<Record<InventoryDocumentType, string>> = {
+const SOURCE_LINE_FIELD: Partial<Record<InventoryDocumentType, string>> = {
   SUPPLIER_RETURN: "sourceWarehouseReceiptLineId",
   SALES_RETURN: "sourceSalesDeliveryLineId",
   CENTER_CONSUMPTION_RETURN: "sourceCenterConsumptionLineId",
@@ -57,7 +57,7 @@ export const SOURCE_LINE_FIELD: Partial<Record<InventoryDocumentType, string>> =
   WAREHOUSE_TRANSFER_IN: "sourceWarehouseTransferOutLineId",
 };
 
-export function isWithBasisSerialBucket(documentType: InventoryDocumentType): boolean {
+function isWithBasisSerialBucket(documentType: InventoryDocumentType): boolean {
   return !!SOURCE_LINE_FIELD[documentType];
 }
 

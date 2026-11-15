@@ -2,7 +2,7 @@
 // Review (مرور حسابها، مرور موجودی انبار، و هر گزارش Review آینده) بدون پیاده‌سازی جداگانه از آن
 // استفاده کند؛ نگاه کنید به ChainedTabsBar.tsx (onClearFilters) برای محل قرارگیری در نوار مشترک
 // چاپ/اکسل/رفرش.
-export function ClearFiltersIcon() {
+function ClearFiltersIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
       <path d="M3 5h13M3 12h7M3 19h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />

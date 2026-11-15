@@ -5,8 +5,10 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { EffectiveTreasurySettings } from "./treasurySettingService";
-import { autoSlotRefreshPatch } from "./accountingLineDims";
+import { autoSlotRefreshPatch, detailSourcesOf } from "./accountingLineDims";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // سند حسابداری «دریافت» (Receipt) — دو مرحله:
@@ -30,11 +32,6 @@ import { findIssuingDocType } from "./documentTypeService";
 // =========================================================================
 
 const RECEIPT_ISSUED_TOLERANCE = 0.0001;
-
-function partyDisplayName(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
 
 type AccountRef = { id: number; title: string; code?: string; isCurrency: boolean; detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null };
 
@@ -65,10 +62,9 @@ const RECEIPT_PLAN_INCLUDE = {
  * ردیف‌های حسابداریِ موردانتظار یک رسید (بدون تفصیل): هر ردیف ابزار ← INSTRUMENT، هر ردیف موضوع ← SUBJECT، و برای هر ردیف موضوعِ دارای اختلاف
  * ارزش ریالی ← FX. خطاها (تنظیم نبودن معین و ...) در errors برمی‌گردند.
  */
-export async function buildReceiptPlan(receipt: any, treasurySettings: EffectiveTreasurySettings, goodsSettings: EffectiveSettings<any>, descriptionOverride?: string) {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-  const description = descriptionOverride ?? `بابت رسید دریافت ${receipt.number} ${formatJalaliDateForMessage(receipt.date)} ${partyDisplayName(receipt.party)}`.trim();
+async function buildReceiptPlan(receipt: any, treasurySettings: EffectiveTreasurySettings, goodsSettings: EffectiveSettings<any>, descriptionOverride?: string) {
+  const baseCurrency = await getBaseCurrency();
+  const description = descriptionOverride ?? `بابت رسید دریافت ${receipt.number} ${formatJalaliDateForMessage(receipt.date)} ${partyTitle(receipt.party)}`.trim();
   const errors: string[] = [];
   const plan: PlannedReceiptLine[] = [];
 
@@ -211,23 +207,12 @@ async function loadSettingSets() {
   return { treasurySettings, goodsSettings };
 }
 
-const parentWhere = (p: { role: string; instrumentLineId?: number; settlementLineId?: number }) => ({
-  role: p.role as any,
-  ...(p.instrumentLineId ? { instrumentLineId: p.instrumentLineId } : { settlementLineId: p.settlementLineId }),
-});
-
 /** تفصیل‌های خودکار یک ردیف حسابداری: تفصیل پایه (صندوق/بانک/طرف حساب) در سطحی که معین به همان نوع وصل است */
 async function autoDetails(account: AccountRef, baseDetailCode: string | null) {
   const typeId = await resolveDetailTypeId(baseDetailCode);
   const f = resolveAccountDetailFields(account, typeId, baseDetailCode);
   return { detail1Code: f.detail1Code ?? null, detail2Code: f.detail2Code ?? null, detail3Code: f.detail3Code ?? null };
 }
-
-const sourcesOf = (d: { detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }) => ({
-  detail1Source: d.detail1Code ? "AUTO" : "MANUAL",
-  detail2Source: d.detail2Code ? "AUTO" : "MANUAL",
-  detail3Source: d.detail3Code ? "AUTO" : "MANUAL",
-}) as { detail1Source: "AUTO" | "MANUAL"; detail2Source: "AUTO" | "MANUAL"; detail3Source: "AUTO" | "MANUAL" };
 
 const receiptKeyOf = (r: { role: string; instrumentLineId?: number | null; settlementLineId?: number | null }) => `${r.role}:${r.instrumentLineId ?? ""}:${r.settlementLineId ?? ""}`;
 
@@ -270,10 +255,10 @@ export async function syncReceiptAccountingLines(ref: ReceiptRef) {
       const auto = autoDims.get(key)!;
       if (!cur) {
         await tx.receiptAccountingLine.create({
-          data: { ...owner, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...sourcesOf(auto) },
+          data: { ...owner, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...detailSourcesOf(auto) },
         });
       } else if (cur.accountId !== p.account.id) {
-        await tx.receiptAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...sourcesOf(auto) } });
+        await tx.receiptAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...detailSourcesOf(auto) } });
       } else {
         // همان معین: ارجاع تنظیم مؤثر (تاریخ اجرای جدید) به‌روز می‌شود و سطح‌های تفصیلِ «خودکار» با مقدار فعلی ابزار/موضوع هم‌گام می‌شوند؛ سطح‌های «دستی» دست‌نخورده
         const patch = autoSlotRefreshPatch(cur as any, auto);

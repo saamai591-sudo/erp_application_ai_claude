@@ -5,7 +5,7 @@ export type SortDir = "asc" | "desc";
 export interface SortKey { header: string; dir: SortDir }
 export interface GridSort extends SortKey { extra?: SortKey[] }
 
-export function sortKeys(s: GridSort | null | undefined): SortKey[] {
+function sortKeys(s: GridSort | null | undefined): SortKey[] {
   return s ? [{ header: s.header, dir: s.dir }, ...(s.extra || [])] : [];
 }
 

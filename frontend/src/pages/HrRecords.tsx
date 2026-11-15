@@ -16,11 +16,10 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { MARITAL_FA } from "../lib/enumLabels";
 
 // منابع انسانی › پرسنلی › سوابق تاریخ‌دار (تحصیلی، ایثارگری، تاهل): سه فرم مستقل با یک پیاده‌سازی مشترک. هر سابقه = کارمند + تاریخ اعمال + مقدار؛
 // مقدار معتبر هر تاریخ، آخرین سابقه‌ی با تاریخ اعمال ≤ آن تاریخ است. فرم کارمند مقدار فعلی را نشان می‌دهد و به همین فرم‌ها لینک می‌شود.
-
-const MARITAL_FA: Record<string, string> = { SINGLE: "مجرد", MARRIED: "متاهل", DIVORCED: "مطلقه", WIDOWED: "همسر فوت‌شده" };
 
 interface RecRow {
   id: number;

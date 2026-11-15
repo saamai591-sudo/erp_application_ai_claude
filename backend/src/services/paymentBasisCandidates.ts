@@ -12,6 +12,14 @@ export type BasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHAS
 // بپذیرد؛ ردیف‌هایی که فاکتور خدمات دارند (servicePurchaseInvoiceId) با SERVICE_PURCHASE_INVOICE دنبال می‌شوند تا شناسه‌ی دو جدول
 // (که ممکن است یکسان باشد) در کلید مانده/تخصیص قاطی نشود.
 export type RowBasisType = BasisType | "SERVICE_PURCHASE_INVOICE";
+
+/** ستون FK هر نوع مبنا در ردیف‌های تسویه‌ی پرداخت / پرداخت تنخواه / خلاصه‌ی تنخواه — منبع واحد. */
+export const BASIS_FIELD: Record<Exclude<RowBasisType, "NONE">, "purchaseInvoiceId" | "servicePurchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
+  PURCHASE_INVOICE: "purchaseInvoiceId",
+  SERVICE_PURCHASE_INVOICE: "servicePurchaseInvoiceId",
+  SALES_INVOICE: "salesInvoiceId",
+  PURCHASE_ORDER: "purchaseOrderId",
+};
 export type PurchaseInvoiceKind = "GOODS" | "SERVICE";
 
 /** نوع مبنای واقعیِ یک ردیف: «فاکتور خرید» با servicePurchaseInvoiceId پرشده ⇒ فاکتور خرید خدمات */

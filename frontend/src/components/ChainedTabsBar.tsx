@@ -1,15 +1,11 @@
 import { ReactNode } from "react";
 import { ClearFiltersButton } from "./ClearFiltersButton";
+import { toFaDigits } from "../lib/formatAmount";
 
 export interface ChainedTab {
   key: string;
   label: string;
   count?: number;
-}
-
-const FA_DIGITS = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
-function toFaDigits(value: string): string {
-  return value.replace(/[0-9]/g, (d) => FA_DIGITS[Number(d)]);
 }
 
 export function ChainedTabsBar({

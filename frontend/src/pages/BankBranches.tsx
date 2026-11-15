@@ -33,7 +33,6 @@ function BranchList() {
   const cacheKey = "/bank-branches";
   const [branches, setBranches] = usePersistedState<Branch[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/banking/branches").then(setBranches).catch((e) => setError(e.message));

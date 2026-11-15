@@ -22,7 +22,7 @@ export function setQuoteReviewSnapshot(snapshot: QuoteReviewSnapshot) {
   store.set(snapshot);
 }
 
-export function clearQuoteReviewSnapshot() {
+function clearQuoteReviewSnapshot() {
   store.clearAll();
 }
 

@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { partyTitle } from "../utils/partyTitle";
 
 // «مرور پیش‌فاکتور» (فروش › گزارش): پیگیری سرنوشت ردیف‌های پیش‌فاکتورِ تاییدشده — چه مقدار/مبلغی سفارش، حواله و فاکتور شده و چه مانده.
 // یک «حقیقت» به ازای هر ردیف پیش‌فاکتور (QuoteLineFact) ساخته می‌شود و تب‌های مرکز فروش/نوع فروش/مشتری/کالا فقط روی همین
@@ -58,7 +59,6 @@ export interface QuoteReviewFilters {
 }
 
 const n = (v: any) => Number(v ?? 0);
-const partyTitleOf = (p: any): string => (p?.detailTitle as string) || (p?.category === "LEGAL" ? p?.name || "" : `${p?.firstName || ""} ${p?.lastName || ""}`.trim());
 const net = (amount: any, discount: any) => n(amount) - n(discount);
 
 export async function getQuoteLineFacts(f: QuoteReviewFilters): Promise<QuoteLineFact[]> {
@@ -160,7 +160,7 @@ export async function getQuoteLineFacts(f: QuoteReviewFilters): Promise<QuoteLin
       salesTypeTitle: quote.salesType.title,
       customerId: quote.customerId,
       customerCode: quote.customer.code,
-      customerTitle: partyTitleOf(quote.customer.party),
+      customerTitle: partyTitle(quote.customer.party),
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,

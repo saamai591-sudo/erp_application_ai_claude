@@ -30,7 +30,7 @@ export function setBankAccountReviewSnapshot(snapshot: BankAccountReviewSnapshot
   store.set(snapshot);
 }
 
-export function clearBankAccountReviewSnapshot() {
+function clearBankAccountReviewSnapshot() {
   store.clearAll();
 }
 

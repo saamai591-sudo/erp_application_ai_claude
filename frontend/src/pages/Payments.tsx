@@ -21,13 +21,16 @@ import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from 
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { BankAccountPicker, bankAccountLabel } from "../components/BankAccountPicker";
-import { partyDisplayName } from "./Users";
+
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
 import { DescriptionField } from "../components/DescriptionField";
 import { TreasuryAccountingPanel } from "../components/TreasuryAccountingPanel";
 import { usePermissions } from "../lib/usePermissions";
 import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
+import { CheckIcon, UndoIcon, PlusIcon, MacroIcon, EyeIcon } from "../components/icons";
+import { partyDisplayName } from "../lib/partyDisplay";
+import { createClientKeyGenerator, treasuryDocStatusLabel } from "../lib/rowHelpers";
 
 // ماژول «خزانه‌داری» > پرداخت / اعلامیه پرداخت — هم‌الگوی Receipts.tsx (نگاه کنید به یادداشت‌های آن فایل و
 // backend/src/routes/payments.ts): چهار ابزار (نقد/حواله بانکی/چک/چک انتقالی) با ارز و نرخ ارز مستقل هر ردیف،
@@ -47,14 +50,7 @@ function selectorKind(nature?: PaymentNature): "BANK" | "CASH" | "CUSTODIAN" | "
 type PaymentBasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
 const TYPE_FA: Record<InstrumentType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", CHEQUE_TRANSFER: "چک انتقالی" };
-const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "ثبت" };
 type AccountingStatus = "NONE" | "APPROVED";
-/** وضعیت نمایشی: ثبت (دارای اثر) ← تایید حسابداری ← سند صادرشد (ثبت = اثر بعد از ذخیره؛ تایید حسابداری = مرحله‌ی حسابداری) */
-function statusLabel(status: DocStatus, accountingStatus?: AccountingStatus, hasJournalEntry?: boolean) {
-  if (hasJournalEntry) return "سند صادر شده";
-  if (accountingStatus === "APPROVED") return "تایید حسابداری";
-  return status === "DRAFT" ? "ثبت (اثرگذاری با ذخیره‌ی بعدی)" : "ثبت";
-}
 
 /** باز شدن فرم «جدید» از «دستیار»: طرف حساب، شرح و مبلغ ردیف اول ابزار، و ابزارها/موضوعات پیش‌تعیین‌شده‌ی دستور میانبر (مبلغ به ردیف اول ابزار و اولین موضوعش می‌رسد) */
 export interface PaymentFromAssistantPrefill {
@@ -80,7 +76,6 @@ interface PickableCheque { id: number; number: string; dueDate: string; amount: 
 // برگه‌ی «خام» دسته چک (Documents/دسته چک.md) — برای ردیف «صدور چک تازه» وقتی حساب بانکی صادرکننده از
 // نوعِ «دارای دسته چک» باشد؛ نگاه کنید به backend/src/routes/chequeBookLeaves.ts و routes/payments.ts.
 interface PickableChequeBookLeaf { id: number; bankAccountId: number; series: string; number: string }
-interface PickableInvoice extends BasisCandidate { salesInvoiceId: number }
 
 // تبدیل ارز/گرد کردن اعشار: از lib/currencyConversion.ts (تنها محل مشترک این فرمول‌ها در فرانت‌اند،
 // هم‌الگوی PurchaseInvoices.tsx/SalesInvoices.tsx/...) ایمپورت می‌شود، نه پیاده‌سازی محلی جدا.
@@ -178,7 +173,6 @@ function infoText() {
 
 // پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
 const ACCOUNTING_NOTICE = "این سند «تایید حسابداری» شده است؛ برای تغییر ابتدا «لغو تایید حسابداری» را بزنید. فقط تفصیل‌های بخش «اطلاعات حسابداری» قابل ویرایش‌اند.";
-const APPROVED_NOTICE = "این سند «تایید» شده است و از مسیر «ویرایش» قابل تغییر نیست؛ برای اصلاح آیتم‌های فاقد گردش از «ویرایش مجدد» استفاده کنید، یا برای تغییر کامل ابتدا آن را «برگشت از تایید» کنید.";
 
 export default function Payments() {
   const location = useLocation();
@@ -192,51 +186,10 @@ export default function Payments() {
   return <PaymentList />;
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function MacroIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function EyeIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
 function PaymentList() {
   const cacheKey = "/payments";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     try {
@@ -282,7 +235,7 @@ function PaymentList() {
           { header: "طرف حساب", render: (r) => r.partyDisplay, filterType: "string", filterValue: (r) => r.partyDisplay },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "جمع (ارز پایه)", fxOnly: true, render: (r) => formatAmountFa(r.totalBaseAmount), filterType: "number", filterValue: (r) => r.totalBaseAmount, decimal: true },
-          { header: "وضعیت", render: (r) => <span className="badge">{statusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber)}</span>, filterType: "string", filterValue: (r) => statusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber) },
+          { header: "وضعیت", render: (r) => <span className="badge">{treasuryDocStatusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber)}</span>, filterType: "string", filterValue: (r) => treasuryDocStatusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber) },
         ]}
         rows={items}
         edit={{ path: (r) => `/payments/${r.id}/edit` }}
@@ -318,11 +271,7 @@ interface InstrumentRowState {
   chequeItemDisplay: string;
   description: string;
 }
-let clientKeySeq = 0;
-function nextClientKey() {
-  clientKeySeq += 1;
-  return `new-${Date.now()}-${clientKeySeq}`;
-}
+const nextClientKey = createClientKeyGenerator("new");
 function emptyInstrumentRow(): InstrumentRowState {
   return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", feeAmount: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", payableChequeTypeId: "", chequeBookLeafId: "", chequeBookLeafDisplay: "", chequeItemId: "", chequeItemDisplay: "", description: "" };
 }
@@ -987,7 +936,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
             </div>
             <div className="form-field">
               <label>وضعیت</label>
-              <div><span className="badge">{statusLabel(status, meta?.accountingStatus, jeLocked)}</span></div>
+              <div><span className="badge">{treasuryDocStatusLabel(status, meta?.accountingStatus, jeLocked)}</span></div>
             </div>
             {meta?.journalEntryReferenceNumber && (
               <div className="form-field">

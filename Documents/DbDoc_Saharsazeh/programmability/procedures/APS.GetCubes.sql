@@ -1,0 +1,3 @@
+﻿CREATE PROCEDURE [APS].[GetCubes]
+AS
+SELECT * FROM APS.AnalysisCube ac

@@ -80,9 +80,7 @@ function CountList() {
     if (!hasPersistedState(BASE)) reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const { hasPermission } = usePermissions();
   const { openTab } = useTabs();
-  const perm = (a: string) => hasPermission(`inventory.stocktaking.warehousing-inventory-counts.${a}`);
   function view(rows: CountRow[], kind: "receipt" | "issue") {
     if (rows.length !== 1) return showError("فقط یک شمارش انتخاب کنید");
     const r = rows[0];

@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { wrapPrintHtml } from "./printService";
 import { loadSalaryAccounts } from "./employeeSalaryAccountService";
+import { money, valueText } from "./payrollPrintCommon";
 
 // چاپ «فیش حقوقی» یک یا چند کارمند از فیش‌های محاسبه‌شده‌ی یک ماه (چیدمان بر اساس نمونه‌ی `Documents/فیش.pdf`):
 // عنوان شرکت و «فیش حقوق ماه … سال …»، مشخصات کارمند، سه ستون کارکرد | مزایا | کسورات، جمع‌ها و جمله‌ی واریز به حساب.
@@ -11,20 +12,6 @@ import { loadSalaryAccounts } from "./employeeSalaryAccountService";
 const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const money = (v: string | number) => Math.round(Number(v)).toLocaleString("en-US");
-
-function hhmm(hours: number): string {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-function valueText(amount: number, valueType: string | undefined): string {
-  if (valueType === "TIME") return hhmm(amount);
-  if (valueType === "DAYS" || valueType === "NUMBER") return String(Math.round(amount * 100) / 100);
-  return money(amount);
-}
-
 const CSS = `
 .slip { border: 1px solid #000; margin: 0 0 7mm; page-break-inside: avoid; break-inside: avoid; font-size: 8.5pt; }
 .slip h1 { font-size: 10pt; margin: 0; padding: 2mm 0 0; text-align: center; font-weight: 700; }

@@ -50,7 +50,6 @@ function SerialList() {
   const cacheKey = "/serials";
   const [items, setItems] = usePersistedState<Serial[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/serials").then(setItems).catch((e) => setError(e.message));

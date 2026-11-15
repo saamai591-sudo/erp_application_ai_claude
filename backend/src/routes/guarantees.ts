@@ -9,6 +9,7 @@ import { toEnglishDigits } from "../utils/digits";
 import { registerTreasuryAccountingRoutes } from "../services/treasuryDocAccountingActions";
 import { accountingApproveGuarantee, setGuaranteeUnapproved, getGuaranteeAccountingView, saveGuaranteeAccountingDetails, issueGuaranteeJournalEntry, revertGuaranteeJournalEntry } from "../services/guaranteeJournalEntryService";
 import { documentHasEvents } from "../services/guaranteeOperationService";
+import { getBaseCurrency } from "../services/baseCurrencyService";
 
 const JE_LOCK_MESSAGE = "برای این سند، سند حسابداری صادر شده است؛ ابتدا سند حسابداری را حذف کنید";
 const ACC_LOCK_MESSAGE = "این سند تایید حسابداری شده است؛ ابتدا «لغو تایید حسابداری» را بزنید";
@@ -97,8 +98,7 @@ async function assertNoOperations(documentId: number) {
 /** اعتبارسنجی و ساخت داده‌ی ابزارهای تضمین (چک/سفته/ضمانت‌نامه)؛ مشترک بین فرم دریافت/پرداخت تضمین و افتتاحیه (services/guaranteeOpeningService.ts) */
 export async function cleanGuaranteeInstruments(lines: any[], direction: Direction, description: string | null) {
   const isReceipt = direction === "RECEIPT";
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
   const currencyCache = new Map<number, any>([[baseCurrency.id, baseCurrency]]);
   const instruments: any[] = [];
   const seen = new Set<string>();

@@ -53,6 +53,7 @@ const MODULE_ICON: Record<string, string> = {
   "فروش فروشگاهی": "store",
   "باشگاه مشتریان": "gift",
   "دارایی ثابت": "building",
+  "مدیریت تولید": "factory",
 };
 
 /** رنگ اختصاصی هر ساب‌ماژول (بر اساس عنوان ساب‌ماژول؛ همین عنوان‌ها در چند ماژول تکرار می‌شوند، پس یک‌بار نگاشت کافی است) */
@@ -208,6 +209,15 @@ function NavIcon({ name }: { name: string }) {
           <path d="M10 10h4" />
           <path d="M10 14h4" />
           <path d="M10 18h4" />
+        </svg>
+      );
+    case "factory":
+      return (
+        <svg {...o}>
+          <path d="M2 20V9l6 4V9l6 4V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v15Z" />
+          <path d="M6 17h2" />
+          <path d="M12 17h2" />
+          <path d="M17 17h1" />
         </svg>
       );
     case "wallet":

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "../components/DataTable";
 import { ErrorToast } from "../components/ErrorToast";
 import { InfoHint } from "../components/InfoHint";
@@ -8,7 +8,8 @@ import { RefreshButton } from "../components/RefreshButton";
 import { AuditChangesTable } from "../components/AuditChangesTable";
 import { api, ApiError } from "../lib/api";
 import { auditActionTitle, auditChangesShort, auditOpenPath, AuditEventView } from "../lib/auditLabels";
-import { formatJalaliDate } from "../lib/formatDate";
+import { formatJalaliDate, localTodayIso } from "../lib/formatDate";
+import { RequiredMark } from "../components/RequiredMark";
 import { usePersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 
@@ -31,14 +32,22 @@ interface Filters {
 }
 const EMPTY: Filters = { from: "", to: "", userId: "", model: "", action: "", kind: "", recordId: "", q: "" };
 
+/** «از/تا تاریخ» همیشه مقدار دارد: پیش‌فرض امروز (حالت ذخیره‌شده‌ی قدیمی تب هم که خالی داشت اصلاح می‌شود) */
+const withDates = (f: Filters): Filters => {
+  const today = localTodayIso();
+  return { ...f, from: f.from || today, to: f.to || today };
+};
+
 function timeFa(iso: string) {
   return `${formatJalaliDate(iso)} ${new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Tehran" })}`;
 }
 
 export default function AuditLog() {
   const { openTab } = useTabs();
-  const [draft, setDraft] = usePersistedState<Filters>("/audit-log:draft", EMPTY);
-  const [applied, setApplied] = usePersistedState<Filters>("/audit-log:applied", EMPTY);
+  const [draftRaw, setDraft] = usePersistedState<Filters>("/audit-log:draft", withDates(EMPTY));
+  const [appliedRaw, setApplied] = usePersistedState<Filters>("/audit-log:applied", withDates(EMPTY));
+  const draft = useMemo(() => withDates(draftRaw), [draftRaw]);
+  const applied = useMemo(() => withDates(appliedRaw), [appliedRaw]);
   const [options, setOptions] = useState<Options>({ users: [], models: [], actions: [] });
   const [rows, setRows] = useState<AuditEventView[]>([]);
   const [total, setTotal] = useState(0);
@@ -76,15 +85,26 @@ export default function AuditLog() {
   }, [load]);
 
   function apply() {
+    if (draft.from > draft.to) {
+      setError("«از تاریخ» نمی‌تواند بعد از «تا تاریخ» باشد");
+      return;
+    }
     setPage(1);
     setApplied(draft);
   }
   function clear() {
-    setDraft(EMPTY);
+    const fresh = withDates(EMPTY);
+    setDraft(fresh);
     setPage(1);
-    setApplied(EMPTY);
+    setApplied(fresh);
   }
-  const set = (p: Partial<Filters>) => setDraft({ ...draft, ...p });
+  // تاریخ‌ها خالی‌شدنی نیستند: پاک‌کردن انتخابگر مقدار قبلی را نگه می‌دارد
+  const set = (p: Partial<Filters>) => {
+    const next = { ...p };
+    if ("from" in next && !next.from) delete next.from;
+    if ("to" in next && !next.to) delete next.to;
+    setDraft({ ...draft, ...next });
+  };
 
   return (
     <div>
@@ -100,11 +120,11 @@ export default function AuditLog() {
       <ErrorToast message={error} />
       <div className="card ar-filters" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginBottom: 8 }}>
         <label className="form-field">
-          <span>از تاریخ</span>
+          <span>از تاریخ<RequiredMark /></span>
           <JalaliDatePicker value={draft.from} onChange={(v) => set({ from: v })} />
         </label>
         <label className="form-field">
-          <span>تا تاریخ</span>
+          <span>تا تاریخ<RequiredMark /></span>
           <JalaliDatePicker value={draft.to} onChange={(v) => set({ to: v })} />
         </label>
         <label className="form-field">

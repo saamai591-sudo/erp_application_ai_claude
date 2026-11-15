@@ -20,7 +20,6 @@ import { loadMissions, missionForDay } from "./attendanceMissionCalc";
 // کنترل منفی: در ثبت/ویرایش و تایید درخواست، مانده‌ی پایان هر روزِ مصرفِ (از روز شروع درخواست به بعد) نباید منفی شود، مگر «مرخصی منفی» برای (نوع، شیفتِ کارمند در آن روز) از آن تاریخ مجاز باشد.
 // سقف سالانه / انتقال به سال بعد / تفکیک مانده به سال / متغیر فرمول از مانده فعلاً ساخته نشده است.
 
-const DAY = 1440;
 const DAY_MS = 86400000;
 const EPS = 1e-6;
 const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
@@ -117,7 +116,7 @@ function makeDailyMinutes() {
  * مصرفِ یک درخواست به تفکیک روز (واحد نوع: روز یا دقیقه) — تنها محاسبه‌ی مصرف؛ هم مانده/سقف‌ها و هم «مقدار درخواست» در فهرست/فرم از همین می‌آید.
  * نوع روزانه: ۱ روز برای هر روز کاری (و روز غیرکاری اگر countHolidays)؛ نوع روزانه و ساعتی: دقیقه‌ی مرخصی همان روز (leaveForDay) و روز غیرکاریِ countHolidays = ساعات کاری روزانه‌ی تقویم.
  */
-export async function requestConsumption(
+async function requestConsumption(
   type: { unit: LeaveUnit; key: string; countHolidays: boolean },
   employeeId: number,
   q: { fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null },
@@ -183,7 +182,7 @@ export async function previewRequestAmount(leaveTypeId: number, employeeId: numb
   return { unit, amount, text: fmtAmount(unit, amount) };
 }
 
-export async function computeLedger(employeeId: number, leaveTypeId: number, opts: { untilDay?: number; extra?: ReqLike; excludeRequestId?: number } = {}): Promise<Ledger> {
+async function computeLedger(employeeId: number, leaveTypeId: number, opts: { untilDay?: number; extra?: ReqLike; excludeRequestId?: number } = {}): Promise<Ledger> {
   const type = await prisma.attendanceLeaveType.findUnique({ where: { id: leaveTypeId } });
   if (!type) throw new AttendanceError("نوع مرخصی یافت نشد");
   const unit: LeaveUnit = type.unit === "DAY" ? "DAY" : "BOTH";

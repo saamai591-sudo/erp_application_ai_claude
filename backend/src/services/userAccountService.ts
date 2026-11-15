@@ -6,7 +6,7 @@ import { getMaxUsers } from "../license/licenseService";
 
 export class UserAccountError extends Error {}
 
-export const LIGHT_ROLE_TITLE = "کارتابل (کاربر سبک)";
+const LIGHT_ROLE_TITLE = "کارتابل (کاربر سبک)";
 const LIGHT_ACTIONS = ["workflow.inbox.my-tasks.view", "workflow.inbox.my-tasks.act"];
 
 /** نقش کاربر سبک را (در صورت نبودن) می‌سازد و مجوزهایش را همگام نگه می‌دارد؛ در راه‌اندازی سرور صدا زده می‌شود */

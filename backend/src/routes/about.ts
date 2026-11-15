@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { prisma } from "../lib/prisma";
 import { evaluateLicense } from "../license/licenseService";
+import { getAppVersion } from "../lib/appVersion";
 
 // «درباره‌ی سیستم» — نسخه‌ی سیستم و نسخه‌ی پایگاه داده برای دیالوگ About در نوار بالای برنامه.
 //
@@ -18,13 +19,7 @@ const router = Router();
 // backend/src/routes → backend (هم در tsx و هم در build شده‌ی dist/routes دو سطح بالاتر است)
 const BACKEND_ROOT = path.resolve(__dirname, "..", "..");
 
-function readVersion(): string {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(BACKEND_ROOT, "package.json"), "utf8")).version || "unknown";
-  } catch {
-    return "unknown";
-  }
-}
+const readVersion = (): string => getAppVersion("unknown");
 
 function latestBundledMigration(): string | null {
   try {

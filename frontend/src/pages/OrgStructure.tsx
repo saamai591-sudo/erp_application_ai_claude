@@ -100,7 +100,6 @@ function OrgTree() {
 
 function RootForm() {
   const navigate = useNavigate();
-  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const { create } = useCrud<TreeNode>("/org-structure");
@@ -142,7 +141,6 @@ function RootForm() {
 
 function NodeEditForm({ editId }: { editId: number }) {
   const navigate = useNavigate();
-  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [title, setTitle] = usePersistedState(`${cacheKey}:title`, "");

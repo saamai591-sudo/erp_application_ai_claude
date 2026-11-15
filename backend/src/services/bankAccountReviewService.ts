@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // منبع داده‌ی گزارش «مرور حساب بانکی» (خزانه‌داری > گزارش). هر «گردش بانکی» یک ورودی (دریافت) یا خروجی
@@ -52,11 +53,6 @@ export interface BankAccountMeta {
   accountTypeCode: number;
   accountTypeTitle: string;
   currencyId: number | null;
-}
-
-function partyDisplay(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
 export async function loadBankAccounts(): Promise<Map<number, BankAccountMeta>> {
@@ -113,7 +109,7 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
         docTypeCode: "RECEIPT",
         docId: l.receiptId,
         docNumber: l.receipt.number,
-        partyDisplay: partyDisplay(l.receipt.party),
+        partyDisplay: partyTitle(l.receipt.party),
         description: l.description || l.receipt.description,
         inflow: Number(l.baseAmount),
         outflow: 0,
@@ -141,7 +137,7 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
         docTypeCode: "PAYMENT",
         docId: l.paymentId,
         docNumber: l.payment.number,
-        partyDisplay: partyDisplay(l.payment.party),
+        partyDisplay: partyTitle(l.payment.party),
         description: (l.description || l.payment.description || "") + (fee > 0 ? `${l.description || l.payment.description ? " — " : ""}شامل کارمزد بانکی` : "") || null,
         inflow: 0,
         outflow: Number(l.baseAmount) + feeBase,
@@ -178,7 +174,7 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
         docTypeCode: "PAYMENT",
         docId: l.paymentId,
         docNumber: l.payment.number,
-        partyDisplay: partyDisplay(l.instrumentLine.type === "CHEQUE_TRANSFER" ? cheque?.party ?? l.payment.party : l.payment.party),
+        partyDisplay: partyTitle(l.instrumentLine.type === "CHEQUE_TRANSFER" ? cheque?.party ?? l.payment.party : l.payment.party),
         description:
           l.description ||
           (l.instrumentLine.type === "CHEQUE_TRANSFER" ? `چک انتقالی شماره ${cheque?.number ?? ""} به حساب بانکی`.trim() : l.payment.description) ||
@@ -205,7 +201,7 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
         docTypeCode: "PAYMENT",
         docId: l.paymentId,
         docNumber: l.payment.number,
-        partyDisplay: partyDisplay(l.payment.party),
+        partyDisplay: partyTitle(l.payment.party),
         description: `چک روز شماره ${l.chequeNumber ?? ""}`.trim(),
         inflow: 0,
         outflow: Number(l.baseAmount),
@@ -242,7 +238,7 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
           docTypeCode: "CLEARING_RECEIVABLE",
           docId: l.chequeClearingReceivableId,
           docNumber: l.chequeClearingReceivable.number,
-          partyDisplay: partyDisplay(l.chequeItem.party),
+          partyDisplay: partyTitle(l.chequeItem.party),
           description: `چک شماره ${l.chequeItem.number}`,
           inflow: Number(l.chequeItem.amount),
           outflow: 0,
@@ -267,7 +263,7 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
         docTypeCode: "CLEARING_PAYABLE",
         docId: l.chequeClearingPayableId,
         docNumber: l.chequeClearingPayable.number,
-        partyDisplay: partyDisplay(l.chequeItem.party),
+        partyDisplay: partyTitle(l.chequeItem.party),
         description: `چک شماره ${l.chequeItem.number}`,
         inflow: 0,
         outflow: Number(l.chequeItem.amount),

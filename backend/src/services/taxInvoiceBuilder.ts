@@ -73,7 +73,7 @@ const TEHRAN_OFFSET_MIN = 210; // +03:30 (بدون ساعت تابستانی)
 const ISSUE_HOUR_TEHRAN = 8;
 
 /** تاریخ فاکتور (Date در UTC نیمه‌شب) ← لحظه‌ی ۰۸:۰۰ تهران همان روز به میلی‌ثانیه‌ی یونیکس */
-export function issueTimeMs(date: Date): number {
+function issueTimeMs(date: Date): number {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), ISSUE_HOUR_TEHRAN, 0) - TEHRAN_OFFSET_MIN * 60_000;
 }
 
@@ -92,7 +92,7 @@ function partyTitle(p: { detailCode: string; name: string | null; firstName: str
 type Buyer = LoadedSalesInvoice["customer"]["party"];
 
 /** نوع شخص خریدار مطابق سامانه: ۱ حقیقی | ۲ حقوقی (حقوقی/موسسه مالی و اعتباری) | ۳ مشارکت مدنی (مشارکت خاص) | ۴ اتباع غیرایرانی */
-export function buyerPersonType(p: Pick<Buyer, "category" | "nationality" | "legalType">): 1 | 2 | 3 | 4 {
+function buyerPersonType(p: Pick<Buyer, "category" | "nationality" | "legalType">): 1 | 2 | 3 | 4 {
   if (p.category === "INDIVIDUAL") return p.nationality === "FOREIGN" ? 4 : 1;
   return p.legalType === "SPECIAL_PARTNERSHIP" ? 3 : 2;
 }

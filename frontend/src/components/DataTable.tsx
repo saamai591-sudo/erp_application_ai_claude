@@ -12,6 +12,7 @@ import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib
 import { measureBestFitWidths, sumWidths } from "../lib/bestFit";
 import { BestFitIcon, BEST_FIT_TITLE } from "./BestFitIcon";
 import { GridSort, nextSort, sortStateOf, makeComparator } from "../lib/gridSort";
+import { TrashIcon, ExcelExportIcon, PrintIcon } from "./icons";
 
 /** اعداد و رشته‌های خالص عددی را به ارقام فارسی تبدیل می‌کند؛ JSX و متن‌های ترکیبی دست‌نخورده می‌مانند */
 function renderCell(value: any): any {
@@ -91,9 +92,9 @@ export interface ActiveFilter {
 }
 
 /** حداکثر تعداد مقدارهای متفاوت برای تشخیص خودکار «ستون انتخابی» */
-export const ENUM_FILTER_MAX_VALUES = 12;
+const ENUM_FILTER_MAX_VALUES = 12;
 /** برچسب گزینه‌ی مقدار خالی در فیلتر انتخابی */
-export const ENUM_EMPTY_LABEL = "(خالی)";
+const ENUM_EMPTY_LABEL = "(خالی)";
 
 /**
  * گزینه‌های فیلتر انتخابیِ یک ستون، یا undefined = فیلتر معمولی. ستونِ متنی که فهرستش سمت مرورگر فیلتر می‌شود
@@ -313,14 +314,6 @@ export function FilterPopover({
   );
 }
 
-function TrashIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7h12ZM10 11v6M14 11v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 export function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
   if (!dir) {
     return (
@@ -340,14 +333,6 @@ export function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
   );
 }
 
-function ChevronDownIcon() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function OperationsIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -360,26 +345,6 @@ function CancelSelectionIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ExcelExportIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M8.5 13.5 12 18M12 13.5l-3.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PrintIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M6 9V3h12v6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <rect x="4" y="9" width="16" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M6 14h12v7H6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }

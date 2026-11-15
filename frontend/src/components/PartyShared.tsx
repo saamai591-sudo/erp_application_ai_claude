@@ -48,7 +48,6 @@ export function PartyList({ category, title, description }: { category: "INDIVID
   const [items, setItems] = usePersistedState<Party[]>(cacheKey, []);
   const [loading, setLoading] = useState(!hasPersistedState(cacheKey));
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
   const basePath = category === "INDIVIDUAL" ? "/parties/individual" : "/parties/legal";
 
   async function reload() {
@@ -77,7 +76,6 @@ export function PartyList({ category, title, description }: { category: "INDIVID
     }
   }
 
-  const LEGAL_TYPE_FA_REVERSE: Record<string, string> = Object.fromEntries(Object.entries(LEGAL_TYPE_FA).map(([k, v]) => [v, k]));
 
   const importColumns =
     category === "INDIVIDUAL"

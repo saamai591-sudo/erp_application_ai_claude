@@ -17,11 +17,6 @@
 /** ماهیت سند انبار: وارده (ورود کالا به انبار) یا صادره (خروج کالا از انبار) */
 export type WarehouseDocDirection = "INBOUND" | "OUTBOUND";
 
-export const WAREHOUSE_DOC_DIRECTION_FA: Record<WarehouseDocDirection, string> = {
-  INBOUND: "وارده",
-  OUTBOUND: "صادره",
-};
-
 /**
  * نوع کالا (AccountingGroup.goodsType) — دقیقاً همان enum GoodsType در schema.prisma.
  * توجه: مقدار SERVICE عمداً در این ماتریس ظاهر نمی‌شود چون اسناد انبار فقط با ردیف‌های
@@ -36,17 +31,6 @@ export type WarehouseGoodsType =
   | "SCRAP" // ضایعات
   | "FIXED_ASSET" // دارایی ثابت
   | "TRADE_GOODS"; // کالای تجاری
-
-export const WAREHOUSE_GOODS_TYPE_FA: Record<WarehouseGoodsType, string> = {
-  RAW_MATERIAL: "مواد اولیه",
-  SEMI_FINISHED: "نیمه‌ساخته",
-  PRODUCT: "محصول",
-  SUPPLIES: "ملزومات",
-  CONTRACT_GOODS: "کارمزدی",
-  SCRAP: "ضایعات",
-  FIXED_ASSET: "دارایی ثابت",
-  TRADE_GOODS: "کالای تجاری",
-};
 
 const ALL_GOODS_TYPES: WarehouseGoodsType[] = [
   "RAW_MATERIAL",
@@ -68,7 +52,7 @@ export interface WarehouseDocNatureRule {
 }
 
 // ترتیب و مقادیر دقیقاً طبق مستند پروژه «نوع کالا-ماهیت سند انبار»
-export const WAREHOUSE_DOC_NATURE_MATRIX: WarehouseDocNatureRule[] = [
+const WAREHOUSE_DOC_NATURE_MATRIX: WarehouseDocNatureRule[] = [
   // ------------------------------------------------------------------ وارده
   { direction: "INBOUND", type: "تولید", allowedGoodsTypes: ["SEMI_FINISHED", "PRODUCT"] },
   { direction: "INBOUND", type: "خرید", allowedGoodsTypes: ["RAW_MATERIAL", "PRODUCT", "FIXED_ASSET", "TRADE_GOODS", "SUPPLIES"] },
@@ -87,11 +71,11 @@ export const WAREHOUSE_DOC_NATURE_MATRIX: WarehouseDocNatureRule[] = [
   { direction: "INBOUND", type: "برگشت از فروش", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "TRADE_GOODS", "SUPPLIES"] },
   { direction: "INBOUND", type: "برگشت مصرف مرکز هزینه", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
   { direction: "INBOUND", type: "برگشت مصرف پروژه", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
-  { direction: "INBOUND", type: "برگشت مصرف تولید", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
+  { direction: "INBOUND", type: "برگشت مصرف تولید", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "TRADE_GOODS", "SUPPLIES"] },
 
   // ----------------------------------------------------------------- صادره
   { direction: "OUTBOUND", type: "فروش", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "TRADE_GOODS", "SUPPLIES"] },
-  { direction: "OUTBOUND", type: "مصرف", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
+  { direction: "OUTBOUND", type: "مصرف", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "TRADE_GOODS", "SUPPLIES"] },
   { direction: "OUTBOUND", type: "انتقالی", allowedGoodsTypes: [...ALL_GOODS_TYPES] },
   { direction: "OUTBOUND", type: "ضایعات", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "TRADE_GOODS", "SUPPLIES"] },
   { direction: "OUTBOUND", type: "انبارگردانی", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "FIXED_ASSET", "TRADE_GOODS", "SUPPLIES"] },
@@ -109,11 +93,6 @@ export const WAREHOUSE_DOC_NATURE_MATRIX: WarehouseDocNatureRule[] = [
   { direction: "OUTBOUND", type: "برگشت به تامین‌کننده", allowedGoodsTypes: ["RAW_MATERIAL", "PRODUCT", "FIXED_ASSET", "TRADE_GOODS", "SUPPLIES"] },
 ];
 
-/** برای انتخاب سریع مقادیر معتبر «نوع» به ازای هر ماهیت (مثلاً برای ساخت select در ماژول‌های آینده) */
-export function listTypesForDirection(direction: WarehouseDocDirection): string[] {
-  return WAREHOUSE_DOC_NATURE_MATRIX.filter((r) => r.direction === direction).map((r) => r.type);
-}
-
 /**
  * انواع کالای مجاز برای بارگذاری در سندی با ماهیت/نوع مشخص.
  * اگر چنین ترکیب ماهیت/نوعی در ماتریس تعریف نشده باشد null برمی‌گرداند (یعنی قاعده‌ای برایش نداریم).
@@ -123,9 +102,3 @@ export function getAllowedGoodsTypes(direction: WarehouseDocDirection, type: str
   return rule ? rule.allowedGoodsTypes : null;
 }
 
-/** آیا کالایی با این «نوع کالا» مجاز است در سندی با این ماهیت/نوع بارگذاری شود؟ */
-export function isGoodsTypeAllowedForDoc(direction: WarehouseDocDirection, type: string, goodsType: string): boolean {
-  const allowed = getAllowedGoodsTypes(direction, type);
-  if (!allowed) return false;
-  return allowed.includes(goodsType as WarehouseGoodsType);
-}

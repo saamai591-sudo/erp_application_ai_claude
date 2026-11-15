@@ -29,7 +29,6 @@ function TypeList() {
   const cacheKey = "/document-types";
   const [items, setItems] = usePersistedState<DocType[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/document-types").then(setItems).catch((e) => setError(e.message));

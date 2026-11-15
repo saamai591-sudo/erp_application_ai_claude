@@ -13,21 +13,12 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
+import { RECEIPT_NATURE_FA } from "../lib/enumLabels";
 
 // «نوع دریافت» — طبق Documents/ReceiptType.md. نوع دریافت (nature) تعیین می‌کند این دریافت اساساً چه
 // ماهیتی دارد، و نوع مبنا (basisType) تعیین می‌کند بر چه سندی مبتنی است؛ مقادیر مجاز نوع مبنا به نوع
 // دریافت بستگی دارد (ALLOWED_BASIS_TYPES — باید دقیقاً هم‌راستا با بک‌اند routes/receiptTypes.ts بماند).
 // معین حسابداری روی نوع نیست؛ در «تعیین حسابهای معین» (خزانه‌داری) تعریف می‌شود.
-
-const NATURE_FA: Record<string, string> = {
-  CUSTOMER_RECEIPT: "دریافت از مشتری",
-  ADVANCE_RECEIPT: "پیش‌دریافت",
-  SUPPLIER_RECEIPT: "دریافت از تأمین‌کننده",
-  OTHER_RECEIPT: "دریافت از سایر",
-  SALES_VAT: "ارزش افزوده فروش",
-  PURCHASE_VAT: "ارزش افزوده خرید",
-  ADVANCE_VAT_RECEIPT: "پیش دریافت ارزش افزوده",
-};
 
 const BASIS_TYPE_FA: Record<string, string> = {
   NONE: "بدون مبنا",
@@ -103,7 +94,7 @@ function ReceiptTypeList() {
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code).padStart(3, "0")), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
-          { header: "نوع دریافت", render: (r) => NATURE_FA[r.nature] || r.nature, filterType: "string", filterValue: (r) => NATURE_FA[r.nature] || r.nature },
+          { header: "نوع دریافت", render: (r) => RECEIPT_NATURE_FA[r.nature] || r.nature, filterType: "string", filterValue: (r) => RECEIPT_NATURE_FA[r.nature] || r.nature },
           { header: "نوع مبنا", render: (r) => BASIS_TYPE_FA[r.basisType] || r.basisType, filterType: "string", filterValue: (r) => BASIS_TYPE_FA[r.basisType] || r.basisType },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
@@ -230,7 +221,7 @@ function ReceiptTypeForm({ editId }: { editId?: number }) {
             </label>
             <select value={form.nature} disabled={hasTransactions} onChange={(e) => onNatureChange(e.target.value)}>
               <option value="">انتخاب کنید</option>
-              {Object.entries(NATURE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(RECEIPT_NATURE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
           <div className="form-field">

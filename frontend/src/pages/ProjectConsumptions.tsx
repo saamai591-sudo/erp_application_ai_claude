@@ -21,6 +21,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
 
 // «مصرف پروژه» — طبق stockAnalysis.md بند ۳۴/۳۹، جایگزین حواله انبار عمومی قدیم (WAREHOUSE_ISSUE)
 // برای طرف‌مقابل «پروژه» است (نگاه کنید به یادداشت بالای backend/src/routes/projectConsumptions.ts).
@@ -62,10 +63,6 @@ export default function ProjectConsumptions() {
   if (isNew) return <ProjectConsumptionForm basePath={basePath} />;
   if (isEdit) return <ProjectConsumptionForm basePath={basePath} editId={Number(id)} />;
   return <ProjectConsumptionList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function ProjectConsumptionList({ basePath }: { basePath: string }) {
@@ -142,7 +139,7 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("PROJECT_CONSUMPTION");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, setError, loaded, submit, remove } = useDocumentForm<
     { date: string; basis: Basis; warehouseId: string; projectId: string; description: string; details: DetailValues },
     RowState,
     Detail

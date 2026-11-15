@@ -34,7 +34,7 @@ const SLOT_FA = ["اول", "دوم", "سوم"];
 const fa = (n: number) => n.toLocaleString("fa-IR");
 
 type RefKey = string; // P:<id> | D:<id> | N:<calcTypeId> | L:<loanTypeId>
-export function refKeyOf(t: { payrollComponentId: number | null; decreeComponentId: number | null; netCalcTypeId: number | null; loanTypeId: number | null }): RefKey {
+function refKeyOf(t: { payrollComponentId: number | null; decreeComponentId: number | null; netCalcTypeId: number | null; loanTypeId: number | null }): RefKey {
   if (t.payrollComponentId) return `P:${t.payrollComponentId}`;
   if (t.decreeComponentId) return `D:${t.decreeComponentId}`;
   if (t.netCalcTypeId) return `N:${t.netCalcTypeId}`;

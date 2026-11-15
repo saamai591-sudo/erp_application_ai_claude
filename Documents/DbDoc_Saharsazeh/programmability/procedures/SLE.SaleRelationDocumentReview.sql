@@ -1,0 +1,258 @@
+﻿CREATE  
+ PROCEDURE [SLE].SaleRelationDocumentReview
+(
+    @BaseTypeId INT,
+    @TypeId INT,
+    @ShowSubmit BIT,
+    @ShowConfirm BIT,
+    @Fromdate DATE,
+    @ToDate DATE,
+    @BranchIds VARCHAR(MAX) = NULL,
+    @DlIds VARCHAR(MAX) = NULL,
+    @StuffIds NVARCHAR(MAX) = NULL,
+    @SaleTypeIds VARCHAR(MAX) = NULL,
+    @SaleModelIds VARCHAR(MAX) = NULL,
+    @SaleGroupIds VARCHAR(MAX) = NULL,
+    @StuffGroupIds VARCHAR(MAX) = NULL,
+    @SaleAreaIds VARCHAR(MAX) = NULL --,
+--  @DocumentIds       VARCHAR(MAX) = NULL
+)
+AS
+CREATE TABLE #Stuffs
+(
+    [value] BIGINT
+);
+
+
+SELECT rfcst.[value]
+INTO #Branches
+FROM CFG.R_FnCommaStr2Table(@BranchIds) AS rfcst;
+
+SELECT rfcst.[value]
+INTO #SaleAreas
+FROM CFG.R_FnCommaStr2Table(@SaleAreaIds) AS rfcst;
+
+SELECT rfcst.[value]
+INTO #Dls
+FROM CFG.R_FnCommaStr2Table(@DlIds) AS rfcst;
+
+SELECT rfcst.[value]
+INTO #SaleTypes
+FROM CFG.R_FnCommaStr2Table(@SaleTypeIds) AS rfcst;
+
+SELECT rfcst.[value]
+INTO #SaleModels
+FROM CFG.R_FnCommaStr2Table(@SaleModelIds) AS rfcst;
+
+SELECT rfcst.[value]
+INTO #SaleGroups
+FROM CFG.R_FnCommaStr2Table(@SaleGroupIds) AS rfcst;
+
+SELECT rfcst.[value]
+INTO #StuffGroups
+FROM CFG.R_FnCommaStr2Table(@StuffGroupIds) AS rfcst;
+
+DECLARE @UserID INT,
+        @DateType TINYINT,
+        @DateFormat VARCHAR(10),
+        @Culture VARCHAR(10);
+SET @Culture = CFG.GetuserCulture();
+
+SET @UserID = CFG.GetuserID();
+
+SELECT @DateType = us.SettingValue
+FROM CFG.UserSetting us
+WHERE us.SettingKey = 'Date_Type'
+      AND us.UserID = @UserID;
+
+IF @DateType IS NULL
+    SET @DateType = CASE @Culture
+                        WHEN 'fa' THEN
+                            0
+                        WHEN 'en' THEN
+                            1
+                        WHEN 'ar' THEN
+                            2
+                    END;
+
+SELECT @DateFormat = us.SettingValue
+FROM CFG.UserSetting us
+WHERE us.SettingKey = 'Date_Format'
+      AND us.UserID = @UserID;
+
+IF @DateFormat IS NULL
+    SET @DateFormat = 'YY/MM/DD';
+
+SELECT dsi.DocumentID,
+       dsi.HeaderID,
+       --dsi.ItemId AS ItemID,
+       dsi.Number,
+       dsi.[Date],
+       CFG.GetCLRSaturnDate(dsi.[Date], @DateFormat, 0, @DateType) AS [Date_Date],
+       T1.BaseMainQuantity,
+       T1.BaseSubQuantity,
+       T1.MainQuantity,
+       T1.SubQuantity,
+       T1.BaseMainQuantity - ISNULL(MainQuantity, 0) AS MainRemain,
+       T1.BaseSubQuantity - ISNULL(SubQuantity, 0) AS SubRemain
+FROM
+(
+    SELECT DocumentID,
+           SUM(   CASE
+                      WHEN Rno = 1 THEN
+                          BaseMainQuantity
+                      ELSE
+                          0
+                  END
+              ) AS BaseMainQuantity,
+           SUM(   CASE
+                      WHEN Rno = 1 THEN
+                          BaseSubQuantity
+                      ELSE
+                          0
+                  END
+              ) AS BaseSubQuantity,
+           SUM(   CASE
+                      WHEN ChildId IS NULL THEN
+                          0
+                      ELSE
+                          MainQuantity
+                  END
+              ) AS MainQuantity,
+           SUM(   CASE
+                      WHEN ChildId IS NULL THEN
+                          0
+                      ELSE
+                          SubQuantity
+                  END
+              ) AS SubQuantity
+    FROM
+    (
+        SELECT DocumentID,
+               fsi.BaseMainQuantity,
+               fsi.BaseSubQuantity,
+               fsi.MainQuantity,
+               fsi.SubQuantity,
+               Parent.Id AS ParentId,
+               Child.Id AS ChildId,
+               ROW_NUMBER() OVER (PARTITION BY Parent.Id ORDER BY Parent.Id) AS Rno
+        FROM
+        (
+            SELECT ItemId,
+                   Id,
+                   DocumentID
+            FROM APS.DimSaleItem dsi
+                INNER JOIN STF.[Stuff] AS s
+                    ON s.StuffID = dsi.StuffID
+                INNER JOIN STF.StuffDetail AS sd
+                    ON sd.StuffID = s.StuffID
+                LEFT JOIN #Branches AS b
+                    ON b.value = dsi.BranchID
+                LEFT JOIN #SaleAreas AS sa
+                    ON sa.value = dsi.SaleAreaID
+                LEFT JOIN #Dls AS b1
+                    ON b1.value = dsi.DlID
+                LEFT JOIN #Stuffs AS b2
+                    ON b2.value = dsi.Id
+                LEFT JOIN #SaleTypes AS b3
+                    ON b3.value = dsi.SaleTypeID
+                LEFT JOIN #SaleModels AS b4
+                    ON b4.value = dsi.SaleModel
+                LEFT JOIN #SaleGroups AS b5
+                    ON b5.value = sd.SalesGroupID
+                LEFT JOIN #StuffGroups AS b6
+                    ON b6.value = s.StuffGroupID
+            WHERE ItemType = @BaseTypeId
+                  AND [Date]
+                  BETWEEN @Fromdate AND @ToDate
+                  AND
+                  (
+                      @BranchIds IS NULL
+                      OR b.value IS NOT NULL
+                  )
+				  AND
+                  (
+                      @SaleAreaIds IS NULL
+                      OR sa.value IS NOT NULL
+                  )
+                  AND
+                  (
+                      @DlIds IS NULL
+                      OR b1.value IS NOT NULL
+                  )
+                  AND
+                  (
+                      @StuffIds IS NULL
+                      OR b2.value IS NOT NULL
+                  )
+                  AND
+                  (
+                      @SaleTypeIds IS NULL
+                      OR b3.value IS NOT NULL
+                  )
+                  AND
+                  (
+                      @SaleModelIds IS NULL
+                      OR b4.value IS NOT NULL
+                  )
+                  AND
+                  (
+                      @SaleGroupIds IS NULL
+                      OR b5.value IS NOT NULL
+                  )
+                  AND
+                  (
+                      @StuffGroupIds IS NULL
+                      OR b6.value IS NOT NULL
+                  )
+                  AND
+                  (
+                      dsi.[Status] IS NULL
+                      OR
+                      (
+                          @ShowSubmit = 1
+                          AND dsi.[Status] = 1
+                      )
+                      OR
+                      (
+                          @ShowConfirm = 1
+                          AND
+                          (
+                              (
+                                  dsi.[Status] = 3
+                                  AND dsi.ItemType <> 4
+                              )
+                              OR
+                              (
+                                  dsi.ItemType = 4
+                                  AND (dsi.[Status] IN ( 2, 3 ))
+                              )
+                          )
+                      )
+                  )
+        -- AND (@DocumentIds IS NULL OR b7.Value IS NOT NULL)
+        ) Parent
+            INNER JOIN APS.FactSaleItem AS fsi
+                ON fsi.ParentId = Parent.Id
+            LEFT JOIN
+            (
+                SELECT APS.DimSaleItem.ItemId,
+                       APS.DimSaleItem.Id
+                FROM APS.DimSaleItem
+                WHERE ItemType = @TypeId
+            ) Child
+                ON Child.Id = fsi.ChildId
+    ) T
+    GROUP BY DocumentID
+) T1
+    INNER JOIN
+    (
+        SELECT DISTINCT
+               DocumentID,
+               Number,
+               HeaderID,
+               Date
+        FROM APS.DimSaleItem AS dsi
+    ) dsi
+        ON dsi.DocumentID = T1.DocumentID;
+

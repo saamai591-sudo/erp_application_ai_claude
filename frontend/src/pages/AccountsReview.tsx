@@ -8,6 +8,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
+import { ISSUING_SYSTEM_FA } from "../lib/issuingSystemLabels";
 import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefaultDate";
 import { useReviewTabLoader, useReviewTabActivation, useReviewTabViewState, serializeForDepsKey } from "../lib/useReviewTabLoader";
 import { useTabs } from "../lib/TabsContext";
@@ -17,6 +18,7 @@ import { appendSortParams } from "../lib/gridSort";
 import { InfoHint } from "../components/InfoHint";
 import { useDetailLevels } from "../lib/useDetailLevels";
 import { ActiveFilter, ColumnFilterType } from "../components/DataTable";
+import { JOURNAL_STATUS_FA } from "../lib/enumLabels";
 
 interface Level { id: number; order: number; title: string }
 interface DocType { id: number; title: string; systemKey: string | null }
@@ -56,18 +58,6 @@ interface LedgerRow {
   baseCredit?: number;
 }
 
-const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
-const ISSUING_SYSTEM_FA: Record<string, string> = {
-  ACCOUNTING: "حسابداری",
-  ACCOUNTING_EXCEL_IMPORT: "حسابداری (ورود از اکسل)",
-  DATA_MIGRATION: "مهاجرت داده",
-  ACCOUNT_CLOSING: "بستن حسابها",
-  OPENING_CLOSING: "افتتاحیه و اختتامیه",
-  WAREHOUSE: "اسناد انبار",
-  PURCHASE: "فاکتور خرید",
-  TREASURY: "خزانه‌داری",
-  FIXED_ASSET: "دارایی ثابت",
-};
 const DETAIL_SLOTS = [1, 2, 3] as const;
 
 const balanceColumns = [
@@ -157,7 +147,7 @@ function ledgerColumns(showRunningBalance: boolean, fx = false): (BalanceTableCo
     { header: "تاریخ", field: "date", render: (r) => formatJalaliDate(r.date), sortValue: (r) => r.date, filterType: "date", filterValue: (r) => r.date?.slice(0, 10) },
     { header: "نوع سند", field: "documentType", render: (r) => r.documentType, sortValue: (r) => r.documentType, filterType: "string", filterValue: (r) => r.documentType },
     { header: "سیستم", field: "issuingSystem", render: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem, sortValue: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem, filterType: "string", filterValue: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem },
-    { header: "وضعیت", field: "status", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, sortValue: (r) => STATUS_FA[r.status] || r.status, filterType: "string", filterValue: (r) => STATUS_FA[r.status] || r.status },
+    { header: "وضعیت", field: "status", render: (r) => <span className="badge">{JOURNAL_STATUS_FA[r.status]}</span>, sortValue: (r) => JOURNAL_STATUS_FA[r.status] || r.status, filterType: "string", filterValue: (r) => JOURNAL_STATUS_FA[r.status] || r.status },
     { header: "شرح", field: "description", render: (r) => r.description || "—", sortValue: (r) => r.description || "", filterType: "string", filterValue: (r) => r.description || "" },
     ...(fx ? [{ header: "ارز", field: "currencyTitle", render: (r: LedgerRow) => r.currencyTitle ?? "", sortValue: (r: LedgerRow) => r.currencyTitle ?? "", filterType: "string" as const, filterValue: (r: LedgerRow) => r.currencyTitle ?? "" }] : []),
     { header: "بدهکار", field: "debit", render: (r) => (r.debit ? formatAmountFa(r.debit) : "—"), sortValue: (r) => r.debit, filterType: "number", filterValue: (r) => r.debit, decimal: true },
@@ -194,7 +184,7 @@ export default function AccountsReview({ fx = false }: { fx?: boolean } = {}) {
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerPageSize, setLedgerPageSize] = useState(snapshot?.ledgerPageSize ?? 25);
   const [ledgerTotal, setLedgerTotal] = useState(0);
-  const [ledgerTotalPages, setLedgerTotalPages] = useState(1);
+  const [, setLedgerTotalPages] = useState(1);
   const [detailQuery, setDetailQuery] = useState<Record<number, DetailQueryState>>(snapshot?.detailQuery ?? {});
   const [detailTotal, setDetailTotal] = useState<Record<number, number>>(snapshot?.detailTotal ?? {});
   const [ledgerSort, setLedgerSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(snapshot?.ledgerSort ?? null);
@@ -228,7 +218,7 @@ export default function AccountsReview({ fx = false }: { fx?: boolean } = {}) {
   // فقط سطح‌های تفصیلِ فعال در «سطوح تفصیل» تب دارند (تعداد فعال همیشه ۱..n پشت‌سرهم است)
   const activeDetailSlots = DETAIL_SLOTS.filter((s) => s <= detailLevels);
 
-  const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
+  const [, setPeriods] = useState<FiscalPeriodRange[]>([]);
   useEffect(() => {
     if (activeTab > ledgerTabIndex) setActiveTab(ledgerTabIndex);
   }, [activeTab, ledgerTabIndex]);

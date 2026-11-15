@@ -17,6 +17,7 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { usePersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
+import { toEnglishDigits } from "../lib/digits";
 
 // مدیریت تردد › تنظیمات › «قاعده‌ی استحقاق مرخصی» — دو تب:
 //  ۱) استحقاق: برای (نوع مرخصی × شیفت × ماه اجرا) مقدار استحقاق هر ماه، وابستگی به کارکرد و زمان تخصیص. برای ماه M آخرین ماه اجرای ≤ M از شیفتِ کارمند در آن ماه معتبر است.
@@ -219,7 +220,7 @@ function EntitlementDialog({ dlg, setDlg, types, shifts, onSaved }: { dlg: EntDl
   /** مقدار یک سقف: روز (نوع روزانه) یا ساعت:دقیقه (روزانه و ساعتی) */
   function parseCap(text: string, label: string): number | string {
     if (unit === "DAY") {
-      const v = Number(text.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
+      const v = Number(toEnglishDigits(text));
       return Number.isFinite(v) && v > 0 ? v : `${label} (روز) باید عددی بزرگ‌تر از صفر باشد`;
     }
     const m = maskToMinutes(text);
@@ -242,7 +243,7 @@ function EntitlementDialog({ dlg, setDlg, types, shifts, onSaved }: { dlg: EntDl
     }
     let amount: number;
     if (unit === "DAY") {
-      amount = Number(dlg.amount.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
+      amount = Number(toEnglishDigits(dlg.amount));
       if (!Number.isFinite(amount) || amount <= 0) return setError(`${annual ? "استحقاق سالانه" : "استحقاق ماهانه"} (روز) باید عددی بزرگ‌تر از صفر باشد`);
     } else {
       const m = maskToMinutes(dlg.amount);
@@ -391,7 +392,7 @@ function PolicyDialog({ dlg, setDlg, types, shifts, onSaved }: { dlg: PolDlg; se
     let limit: number | null = null;
     if (dlg.allowed && dlg.limit.trim() !== "") {
       if (unit === "DAY") {
-        limit = Number(dlg.limit.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
+        limit = Number(toEnglishDigits(dlg.limit));
         if (!Number.isFinite(limit) || limit <= 0) return setError("سقف مرخصی منفی (روز) باید عددی بزرگ‌تر از صفر باشد؛ برای بدون سقف خالی بگذارید");
       } else {
         const m = maskToMinutes(dlg.limit);

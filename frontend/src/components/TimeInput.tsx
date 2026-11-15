@@ -1,10 +1,9 @@
+import { toEnglishDigits } from "../lib/digits";
 // ورودی «ساعت:دقیقه» با ماسک: کاربر از چپ می‌نویسد و «:» خودکار می‌آید.
 //  • ساعت روزانه (۲ رقم ساعت): «۰۷» ← «07:» و ادامه‌ی «۲۰» ← «07:20».
 //  • ساعت‌های تجمعی (تا ۳ رقم ساعت: hhh:mm): بعد از رقم سوم ساعت «:» خودکار می‌آید («۲۲۷» ← «227:»)؛ برای ساعت کمتر از ۱۰۰ کاربر «:» را می‌زند («۸۰:» ← ادامه‌ی دقیقه).
 //  • رقم اول دقیقه بزرگ‌تر از ۵ صفر پیش می‌گیرد («07:7» ← «07:07»)؛ با خروج از فیلد مقدار کامل می‌شود («7» ← «07:00»).
 // مقدار متنیِ ماسک‌شده برمی‌گردد («» وقتی چیزی نیست)؛ کامل بودن/معتبر بودن را مصرف‌کننده با maskToMinutes می‌سنجد.
-
-const toLatin = (s: string) => s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 
 /** دقیقه → متن «HH:MM» (ساعت حداقل دو رقم) */
 export function minutesToMask(min: number): string {
@@ -20,13 +19,13 @@ export function maskHm(digits: string): string {
 
 /** متن ماسک‌شده → دقیقه (null = ناقص/نامعتبر) */
 export function maskToMinutes(text: string): number | null {
-  const m = /^(\d{1,3}):([0-5]\d)$/.exec(toLatin(text).trim());
+  const m = /^(\d{1,3}):([0-5]\d)$/.exec(toEnglishDigits(text).trim());
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
 /** متنِ در حال تایپ → متن ماسک‌شده؛ deleting=true یعنی کاربر حذف می‌کند (دو رقمِ ساعت بدون «:» اجباری می‌ماند تا Backspace گیر نکند) */
 function applyMask(raw: string, maxHourDigits: number, deleting: boolean): string {
-  const t = toLatin(raw).replace(/[^0-9:]/g, "");
+  const t = toEnglishDigits(raw).replace(/[^0-9:]/g, "");
   if (!t) return "";
   const colon = t.indexOf(":");
   let hours: string;
@@ -64,7 +63,7 @@ function finishMinutes(hours: string, minutesIn: string | null): string {
 
 /** با خروج از فیلد: ساعت دو رقمی و دقیقه‌ی دو رقمی («7» ← «07:00»، «07:2» ← «07:02»)؛ متنِ بی‌رقم خالی می‌شود */
 function normalize(text: string, maxHourDigits: number): string {
-  const t = toLatin(text);
+  const t = toEnglishDigits(text);
   const colon = t.indexOf(":");
   const hoursRaw = stripLeadingZeros((colon >= 0 ? t.slice(0, colon) : t).replace(/\D/g, "").slice(0, maxHourDigits));
   const minutesRaw = colon >= 0 ? t.slice(colon + 1).replace(/\D/g, "").slice(0, 2) : "";

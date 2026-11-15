@@ -3,8 +3,9 @@ import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { EffectiveTreasurySettings } from "./treasurySettingService";
-import { autoSlotRefreshPatch } from "./accountingLineDims";
+import { autoSlotRefreshPatch, detailSourcesOf } from "./accountingLineDims";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
 
 // =========================================================================
 // سند حسابداری «دریافت تضمین» و «پرداخت تضمین» — دو مرحله مثل دریافت/پرداخت:
@@ -64,9 +65,8 @@ async function loadSettings() {
 }
 
 /** ردیف‌های حسابداریِ موردانتظار (بدون تفصیل) + خطاها (نبودن معین برای نوع تضمین و ...) */
-export async function buildGuaranteePlan(doc: any, settings: EffectiveTreasurySettings) {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+async function buildGuaranteePlan(doc: any, settings: EffectiveTreasurySettings) {
+  const baseCurrency = await getBaseCurrency();
   const word = doc.direction === "RECEIPT" ? "دریافت" : "پرداخت";
   const description = `بابت ${word} تضمین شماره ${doc.number} ${formatJalaliDateForMessage(doc.date)} ${doc.party?.detailTitle ?? ""}`.trim();
   const errors: string[] = [];
@@ -115,13 +115,6 @@ async function autoDims(plan: PlannedGuaranteeLine[]) {
   return out;
 }
 
-const sourcesOf = (d: { detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }) =>
-  ({
-    detail1Source: d.detail1Code ? "AUTO" : "MANUAL",
-    detail2Source: d.detail2Code ? "AUTO" : "MANUAL",
-    detail3Source: d.detail3Code ? "AUTO" : "MANUAL",
-  }) as { detail1Source: "AUTO" | "MANUAL"; detail2Source: "AUTO" | "MANUAL"; detail3Source: "AUTO" | "MANUAL" };
-
 /** همگام‌سازی ردیف‌های حسابداری با ابزارهای سند (idempotent؛ مثل syncReceiptAccountingLines) */
 /** client: در صورت ارسال (تراکنش افتتاحیه) همه‌ی خواندن/نوشتن‌ها روی همان تراکنش انجام می‌شود */
 export async function syncGuaranteeAccountingLines(docId: number, client: any = prisma) {
@@ -140,9 +133,9 @@ export async function syncGuaranteeAccountingLines(docId: number, client: any = 
       const cur = byKey.get(key);
       const a = auto.get(key)!;
       if (!cur) {
-        await tx.guaranteeAccountingLine.create({ data: { documentId: docId, instrumentId: p.instrumentId, role: p.role, accountId: p.account.id, treasurySettingId: p.treasurySettingId, ...a, ...sourcesOf(a) } });
+        await tx.guaranteeAccountingLine.create({ data: { documentId: docId, instrumentId: p.instrumentId, role: p.role, accountId: p.account.id, treasurySettingId: p.treasurySettingId, ...a, ...detailSourcesOf(a) } });
       } else if (cur.accountId !== p.account.id) {
-        await tx.guaranteeAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, treasurySettingId: p.treasurySettingId, ...a, ...sourcesOf(a) } });
+        await tx.guaranteeAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, treasurySettingId: p.treasurySettingId, ...a, ...detailSourcesOf(a) } });
       } else {
         const patch = autoSlotRefreshPatch(cur as any, a);
         const refChanged = cur.treasurySettingId !== p.treasurySettingId;

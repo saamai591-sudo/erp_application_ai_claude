@@ -18,7 +18,7 @@ async function calendarMonth(year: number, month: number) {
   return cal;
 }
 
-export function calculationShape(c: any) {
+function calculationShape(c: any) {
   return { id: c.id, sentToPayrollAt: c.sentToPayrollAt ?? null, calculatedAt: c.calculatedAt, days: c.days, incompleteDays: c.incompleteDays, factorErrors: c.factorErrors, hasErrors: c.hasErrors, itemCount: c._count?.items ?? undefined };
 }
 

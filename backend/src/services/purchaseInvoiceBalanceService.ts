@@ -2,6 +2,8 @@ import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { PAYMENT_DOC_INCLUDE, paymentLineDoc } from "./settlementDocRef";
 import { basisGroupOf, BasisGroup } from "./paymentBasisCandidates";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // «مرور مانده فاکتور خرید» (زنجیره تامین › گزارش): مانده‌ی هر فاکتور خرید تاییدشده (کالا و خدمات) = مبلغ − پرداخت‌شده.
 // همان تعریف «مانده‌ی قابل پرداخت» انتخابگر پرداخت (paymentBasisCandidates.ts): مبلغ = Σ(مبلغ − تخفیف) (+ «سایر هزینه‌ها»ی فاکتور کالا)،
@@ -31,7 +33,6 @@ export interface InvoiceBalanceRow {
 }
 
 const n = (v: any) => Number(v ?? 0);
-const partyTitleOf = (p: any): string => (p?.detailTitle as string) || (p?.category === "LEGAL" ? p?.name || "" : `${p?.firstName || ""} ${p?.lastName || ""}`.trim());
 const iso = (d: Date) => new Date(d).toISOString().slice(0, 10);
 
 function settlementPaid(lines: any[], group: BasisGroup): number {
@@ -47,8 +48,7 @@ function advancePaid(items: any[], group: BasisGroup): number {
 const paidOf = (inv: any, group: BasisGroup) => settlementPaid(inv.paymentSettlementLines, group) + pettyPaid(inv.pettyCashPayments, group) + advancePaid(inv.advanceAllocations, group);
 
 export async function getPurchaseInvoiceBalance(opts: { from?: string; to?: string; onlyRemaining: boolean }): Promise<InvoiceBalanceRow[]> {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
   const dateWhere: any = {};
   if (opts.from) dateWhere.gte = new Date(opts.from);
   if (opts.to) dateWhere.lte = new Date(opts.to);
@@ -77,7 +77,7 @@ export async function getPurchaseInvoiceBalance(opts: { from?: string; to?: stri
       kind,
       invoiceId: inv.id,
       partyCode: inv.party.detailCode ?? "",
-      partyTitle: partyTitleOf(inv.party),
+      partyTitle: partyTitle(inv.party),
       number: inv.number,
       date: iso(inv.date),
       vendorInvoiceNumber: inv.vendorInvoiceNumber ?? null,
@@ -114,8 +114,7 @@ export interface InvoicePaymentItem {
 
 // ریز پرداخت‌های پشت سلول «مقدار پرداخت‌شده»: همان ردیف‌هایی که در جمع پرداخت‌شده آمده‌اند (به ارز فاکتور؛ برای سطر ارزش‌افزوده × نرخ فاکتور به ارز پایه)
 export async function getPurchaseInvoicePayments(kind: InvoiceKind, invoiceId: number, part: BalancePart) {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
   const include = {
     currency: true,
     paymentSettlementLines: { include: { ...PAYMENT_DOC_INCLUDE, paymentType: true } },

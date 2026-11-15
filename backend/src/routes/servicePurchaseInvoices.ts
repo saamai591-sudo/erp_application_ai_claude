@@ -4,8 +4,7 @@ import { DetailRuleIndex, applyRule } from "../services/detailRuleService";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate, getAdvancePaymentMethodForDate } from "../services/accountingSettingsService";
@@ -26,9 +25,11 @@ import { resolveDetailTypeId, resolveAccountDetailFields, resolveDetailTitles } 
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { netAllocationAmounts } from "../utils/purchaseDiscount";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
-import { saveDocumentDetails, loadDocumentDetails, DetailValueInput } from "../services/docDetailService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 import { findEffectiveTreasurySetting } from "../services/treasurySettingService";
 import { findIssuingDocType } from "../services/documentTypeService";
+import { getBaseCurrency, resolveFxRate } from "../services/baseCurrencyService";
+import { partyTitleOrNull } from "../utils/partyTitle";
 
 const FORM = findFormPrefix("service-purchase-invoices");
 
@@ -106,34 +107,9 @@ interface HeaderBody {
   lines: LineInput[];
 }
 
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
-
-function partyTitle(p: any): string | null {
-  if (!p) return null;
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
-async function getBaseCurrency() {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است؛ ابتدا یک ارز را به‌عنوان ارز پایه مشخص کنید");
-  return baseCurrency;
-}
-
 /** نرخ تبدیل ارز فاکتور را از بدنه‌ی درخواست resolve می‌کند — دقیقاً هم‌الگوی
  * purchaseInvoices.ts#resolveInvoiceFxRate: اگر ارز فاکتور همان ارز مبنا باشد همیشه ۱ برمی‌گردد، وگرنه
  * نرخ باید توسط کاربر وارد شده باشد (اجباری، بزرگ‌تر از صفر)، نه از جدول نرخ ارز. */
-function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFxRate: number | undefined): number {
-  if (currencyId === baseCurrencyId) return 1;
-  const fxRate = Number(bodyFxRate);
-  if (!(fxRate > 0)) throw new Error("نرخ ارز الزامی است");
-  return fxRate;
-}
 
 const ALLOCATION_METHODS = new Set(["VALUE", "QUANTITY"]);
 
@@ -285,7 +261,7 @@ router.get("/service-purchase-invoices", can(`${FORM}.view`), async (_req, res) 
       date: d.date,
       vendorInvoiceNumber: d.vendorInvoiceNumber,
       partyId: d.partyId,
-      partyTitle: partyTitle(d.party),
+      partyTitle: partyTitleOrNull(d.party),
       purchaseTypeId: d.purchaseTypeId,
       purchaseTypeTitle: d.purchaseType.title,
       currencyId: d.currencyId,
@@ -346,7 +322,7 @@ router.get("/service-purchase-invoices/:id", can(`${FORM}.view`), async (req, re
     details: extraDetails.header,
     vendorInvoiceNumber: d.vendorInvoiceNumber,
     partyId: d.partyId,
-    partyTitle: partyTitle(d.party),
+    partyTitle: partyTitleOrNull(d.party),
     purchaseTypeId: d.purchaseTypeId,
     purchaseTypeTitle: d.purchaseType.title,
     currencyId: d.currencyId,
@@ -394,16 +370,15 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
 
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف مقابل یافت نشد");
     const purchaseType = await prisma.purchaseType.findUnique({ where: { id: body.purchaseTypeId } });
     if (!purchaseType) throw new Error("نوع خرید یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
+    const baseCurrency = await getBaseCurrency();
+    const fxRate = resolveFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
     const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency, date);
 
@@ -469,16 +444,15 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این فاکتور خرید خدمات");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف مقابل یافت نشد");
     const purchaseType = await prisma.purchaseType.findUnique({ where: { id: body.purchaseTypeId } });
     if (!purchaseType) throw new Error("نوع خرید یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
+    const baseCurrency = await getBaseCurrency();
+    const fxRate = resolveFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
     const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency, date);
     // اگر تخصیص پیش‌پرداختی برای این فاکتور ثبت شده، ویرایش نباید آن را با طرف‌حساب/ارز/تاریخ/مبلغ جدید ناسازگار کند
@@ -636,9 +610,6 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
     return res.status(400).json({ error: "این فاکتور سند مبنای یک پرداخت (اعلامیه پرداخت، پرداخت تنخواه یا خلاصه تنخواه) است؛ ابتدا باید آن پرداخت‌ها حذف یا اصلاح شوند" });
   }
 
-  const baseCurrency = await getBaseCurrency();
-  const fxRate = Number(invoice.fxRate);
-
   await prisma.$transaction(async (tx) => {
     for (const line of invoice.lines) {
       if (line.basis !== "WAREHOUSE_RECEIPT") continue;
@@ -692,8 +663,7 @@ export async function issueServicePurchaseInvoiceJournalHandler(req: any, res: a
   if (invoice.journalEntryId) return res.status(400).json({ error: "قبلاً برای این فاکتور سند حسابداری صادر شده است" });
 
   try {
-    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const baseCurrency = await getBaseCurrency();
     const fxRate = Number(invoice.fxRate);
 
     const partyDetailCode = invoice.party.detailCode;
@@ -756,7 +726,7 @@ export async function issueServicePurchaseInvoiceJournalHandler(req: any, res: a
     }
 
     const vendorInvoiceNumber = invoice.vendorInvoiceNumber || String(invoice.number);
-    const description = `بابت فاکتور خرید خدمات ${vendorInvoiceNumber} ${formatJalaliDateForMessage(invoice.date)} ${partyTitle(invoice.party) || ""}`.trim();
+    const description = `بابت فاکتور خرید خدمات ${vendorInvoiceNumber} ${formatJalaliDateForMessage(invoice.date)} ${partyTitleOrNull(invoice.party) || ""}`.trim();
 
     const errors: string[] = [];
     const debitLines: IssueLineInput[] = [];
@@ -933,7 +903,7 @@ export async function issueServicePurchaseInvoiceJournalHandler(req: any, res: a
           vHist += rowHist;
         }
         const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
-        const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${paymentLineDoc(l).number} به فاکتور خرید خدمات ${invoice.number} ${partyTitle(invoice.party) || ""}`.trim();
+        const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${paymentLineDoc(l).number} به فاکتور خرید خدمات ${invoice.number} ${partyTitleOrNull(invoice.party) || ""}`.trim();
         if (account.isCurrency && !invIsBase) {
           advanceCreditLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: 0, credit: amount, fxRate: rowRate, description: advDescription });
         } else {

@@ -126,7 +126,7 @@ model UserRole {
 }
 
 model Currency {
-  guaranteeInstruments GuaranteeInstrument[]
+  guaranteeInstruments          GuaranteeInstrument[]
   purchaseReturns               PurchaseReturn[]
   partyBalanceOpeningLines      PartyBalanceOpeningLine[]
   id                            Int                          @id @default(autoincrement())
@@ -175,12 +175,15 @@ model ExchangeRate {
 }
 
 model FiscalPeriod {
-  guaranteeReturns GuaranteeReturn[]
-  guaranteeOperations GuaranteeOperation[]
-  guaranteeExtensions GuaranteeExtension[]
-  cashBoxTransfers CashBoxTransfer[]
-  guaranteeDocuments GuaranteeDocument[]
-  inventoryCounts InventoryCount[]
+  productionOrders               ProductionOrder[]
+  productionStats                ProductionStat[]
+  productionDeliveries           ProductionDelivery[]
+  guaranteeReturns               GuaranteeReturn[]
+  guaranteeOperations            GuaranteeOperation[]
+  guaranteeExtensions            GuaranteeExtension[]
+  cashBoxTransfers               CashBoxTransfer[]
+  guaranteeDocuments             GuaranteeDocument[]
+  inventoryCounts                InventoryCount[]
   countTagIssues                 InventoryCountTagIssue[]
   purchaseReturns                PurchaseReturn[]
   partyBalanceOpening            PartyBalanceOpening?
@@ -254,6 +257,9 @@ enum ReportingPeriodStatus {
 }
 
 model ReportingPeriod {
+  productionCostRun     ProductionCostRun?
+  costAccountRules      CostAccountRule[]
+  wipCounts             WipCount[]
   assetInsuranceRun     AssetInsuranceRun?
   assetDepreciationRun  AssetDepreciationRun?
   id                    Int                         @id @default(autoincrement())
@@ -328,11 +334,11 @@ model DetailCodeUsage {
 }
 
 model Party {
-  guaranteeReturns GuaranteeReturn[]
-  guaranteeOperations GuaranteeOperation[]
-  guaranteeExtensions GuaranteeExtension[]
-  guaranteeDocuments GuaranteeDocument[]
-  guaranteeBankInstruments GuaranteeInstrument[] @relation("GuaranteeInstrumentBank")
+  guaranteeReturns           GuaranteeReturn[]
+  guaranteeOperations        GuaranteeOperation[]
+  guaranteeExtensions        GuaranteeExtension[]
+  guaranteeDocuments         GuaranteeDocument[]
+  guaranteeBankInstruments   GuaranteeInstrument[]     @relation("GuaranteeInstrumentBank")
   purchaseReturns            PurchaseReturn[]
   partyBalanceOpeningLines   PartyBalanceOpeningLine[]
   payrollIssueSettingsSecond PayrollIssueSetting[]     @relation("PayrollIssueSecondingParty")
@@ -447,7 +453,7 @@ model BankAccountType {
 }
 
 model BankBranch {
-  guaranteeInstruments GuaranteeInstrument[]
+  guaranteeInstruments         GuaranteeInstrument[]
   id                           Int                     @id @default(autoincrement())
   code                         Int
   title                        String                  @unique
@@ -463,7 +469,7 @@ model BankBranch {
 }
 
 model BankAccount {
-  guaranteeInstruments GuaranteeInstrument[]
+  guaranteeInstruments    GuaranteeInstrument[]
   storePayments           StorePayment[]
   id                      Int                          @id @default(autoincrement())
   detailCode              String                       @unique
@@ -548,19 +554,29 @@ enum ChequeBookLeafStatus {
 }
 
 model CostCenter {
-  assetPositions      AssetPosition[]
-  id                  Int                  @id @default(autoincrement())
-  detailCode          String               @unique
-  title               String               @unique
-  type                CostCenterType       @default(ADMIN)
-  orgUnitId           Int
-  hasTransactions     Boolean              @default(false)
-  orgUnit             OrgUnit              @relation(fields: [orgUnitId], references: [id])
-  goodsRequestLines   GoodsRequestLine[]
-  warehouseIssues     WarehouseIssue[]
-  employeeAssignments EmployeeAssignment[]
-  employmentDecrees   EmploymentDecree[]
-  salesStations       SalesStation[]
+  assetPositions        AssetPosition[]
+  productionStats       ProductionStat[]
+  deliveriesFrom        ProductionDelivery[]           @relation("ProductionDeliveryFrom")
+  deliveriesTo          ProductionDelivery[]           @relation("ProductionDeliveryTo")
+  wipLines              WipCountLine[]
+  productionCostCenters ProductionCostCenter[]
+  productionCostItems   ProductionCostCenterItem[]
+  costAccountAllocs     ProductionCostAccountAlloc[]
+  costComponents        ProductionCostComponent[]
+  costCenterMaterials   ProductionCostCenterMaterial[]
+  productionTimeSheets  ProductionTimeSheet[]
+  id                    Int                            @id @default(autoincrement())
+  detailCode            String                         @unique
+  title                 String                         @unique
+  type                  CostCenterType                 @default(ADMIN)
+  orgUnitId             Int
+  hasTransactions       Boolean                        @default(false)
+  orgUnit               OrgUnit                        @relation(fields: [orgUnitId], references: [id])
+  goodsRequestLines     GoodsRequestLine[]
+  warehouseIssues       WarehouseIssue[]
+  employeeAssignments   EmployeeAssignment[]
+  employmentDecrees     EmploymentDecree[]
+  salesStations         SalesStation[]
 }
 
 model OrgUnit {
@@ -608,7 +624,7 @@ model SalesCenter {
 }
 
 model CashBox {
-  guaranteeDocuments GuaranteeDocument[]
+  guaranteeDocuments      GuaranteeDocument[]
   storePayments           StorePayment[]
   id                      Int                      @id @default(autoincrement())
   detailCode              String                   @unique
@@ -772,7 +788,11 @@ model OlapReport {
 }
 
 model Account {
-  guaranteeAccountingLines GuaranteeAccountingLine[]
+  costAccountRules               CostAccountRule[]
+  costAccountAllocs              ProductionCostAccountAlloc[]
+  productionCostJournalLines     ProductionCostJournalLine[]
+  costComponents                 ProductionCostComponent[]
+  guaranteeAccountingLines       GuaranteeAccountingLine[]
   assetAccountSettings           AssetAccountSetting[]           @relation("AssetAccountSettingAccount")
   payrollJournalTemplates        PayrollJournalTemplate[]
   id                             Int                             @id @default(autoincrement())
@@ -817,9 +837,10 @@ model DocumentType {
 }
 
 model JournalEntry {
-  guaranteeReturn GuaranteeReturn?
-  guaranteeOperation GuaranteeOperation?
-  guaranteeDocument GuaranteeDocument?
+  productionCostRun             ProductionCostRun?
+  guaranteeReturn               GuaranteeReturn?
+  guaranteeOperation            GuaranteeOperation?
+  guaranteeDocument             GuaranteeDocument?
   purchaseReturn                PurchaseReturn?
   assetInsuranceRuns            AssetInsuranceRun[]
   assetExits                    AssetExit[]
@@ -1183,6 +1204,21 @@ model GoodsAttributeItem {
 }
 
 model GoodsItem {
+  bomsAsOutput               Bom[]                           @relation("BomOutput")
+  bomLinesAsComponent        BomLine[]                       @relation("BomComponent")
+  productionTimeLines        ProductionTimeLine[]
+  productionOrders           ProductionOrder[]
+  productionOrderLines       ProductionOrderLine[]
+  wipCountLines              WipCountLine[]
+  productionStatLines        ProductionStatLine[]
+  productionDeliveryLines    ProductionDeliveryLine[]
+  costCenterCostItems        ProductionCostCenterItem[]
+  costComponents             ProductionCostComponent[]       @relation("CostComponentOutput")
+  costComponentUses          ProductionCostComponent[]       @relation("CostComponentItem")
+  costCenterMaterials        ProductionCostCenterMaterial[]
+  itemPlanning               ItemPlanning?
+  mrpPlannedOrders           MrpPlannedOrder[]
+  productionCostItems        ProductionCostItem[]
   countTags                  InventoryCountTag[]
   purchaseReturnLines        PurchaseReturnLine[]
   assetReceiptLines          AssetReceiptLine[]
@@ -1280,16 +1316,20 @@ model Batch {
   expiryDate            DateTime?            @db.Date
   sourceType            BatchSourceType      @default(MANUAL)
   supplierId            Int?
-  productionReferenceId Int?
+  /// بچ تولیدی: دستور تولیدی که بچ برای آن ساخته شده (اختیاری؛ فقط سیستم پر می‌کند)
+  productionOrderId     Int?
   description           String?
   isActive              Boolean              @default(true)
   hasTransactions       Boolean              @default(false)
   createdAt             DateTime             @default(now())
   goodsItem             GoodsItem            @relation(fields: [goodsItemId], references: [id])
   supplier              Party?               @relation("BatchSupplier", fields: [supplierId], references: [id])
+  productionOrder       ProductionOrder?     @relation("BatchProductionOrder", fields: [productionOrderId], references: [id], onDelete: Restrict)
   inventoryLines        InventoryLineBatch[]
+  productionStatLines   ProductionStatLine[]
 
   @@unique([goodsItemId, batchNumber])
+  @@index([productionOrderId])
 }
 
 // سریال — طبق stockAnalysis.md بند ۱۷-۲۰: Master مستقل، تعریف در ماژول کالا و خدمت؛ انبار فقط
@@ -1653,32 +1693,32 @@ model PayableChequeType {
 // یکی از فیلدهای هدف (bankAccountId برای BANK_ACCOUNT و BANK_FEE مشترک است) پر می‌شود و بقیه null هستند
 // (نگاه کنید به TARGET_FIELD در routes/treasuryAccountSettings.ts). برای هر نوع حساب و هر مورد فقط یک معین.
 model TreasuryAccountSetting {
-  id                     Int                      @id @default(autoincrement())
-  accountType            TreasuryAccountType
-  bankAccountId          Int?
-  cashBoxId              Int?
-  receivableChequeTypeId Int?
-  payableChequeTypeId    Int?
-  receiptTypeId          Int?
-  paymentTypeId          Int?
-  pettyCashId            Int?
+  id                       Int                       @id @default(autoincrement())
+  accountType              TreasuryAccountType
+  bankAccountId            Int?
+  cashBoxId                Int?
+  receivableChequeTypeId   Int?
+  payableChequeTypeId      Int?
+  receiptTypeId            Int?
+  paymentTypeId            Int?
+  pettyCashId              Int?
   /// نوع تضمین (برای چهار نوع حساب تضمین)
-  guaranteeTypeId        Int?
-  accountId              Int
+  guaranteeTypeId          Int?
+  accountId                Int
   /// تاریخ اجرا: رکورد مؤثر یک سند = آخرین رکورد هم‌هدف با effectiveDate ≤ تاریخ سند (services/treasurySettingService.ts)
-  effectiveDate          DateTime                 @default("2000-01-01T00:00:00.000Z") @db.Date
-  createdAt              DateTime                 @default(now())
-  account                Account                  @relation(fields: [accountId], references: [id])
-  bankAccount            BankAccount?             @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
-  cashBox                CashBox?                 @relation(fields: [cashBoxId], references: [id], onDelete: Restrict)
-  receivableChequeType   ReceivableChequeType?    @relation(fields: [receivableChequeTypeId], references: [id], onDelete: Restrict)
-  payableChequeType      PayableChequeType?       @relation(fields: [payableChequeTypeId], references: [id], onDelete: Restrict)
-  receiptType            ReceiptType?             @relation(fields: [receiptTypeId], references: [id], onDelete: Restrict)
-  paymentType            PaymentType?             @relation(fields: [paymentTypeId], references: [id], onDelete: Restrict)
-  pettyCash              PettyCash?               @relation(fields: [pettyCashId], references: [id], onDelete: Restrict)
-  guaranteeType          GuaranteeType?           @relation(fields: [guaranteeTypeId], references: [id], onDelete: Restrict)
+  effectiveDate            DateTime                  @default("2000-01-01T00:00:00.000Z") @db.Date
+  createdAt                DateTime                  @default(now())
+  account                  Account                   @relation(fields: [accountId], references: [id])
+  bankAccount              BankAccount?              @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  cashBox                  CashBox?                  @relation(fields: [cashBoxId], references: [id], onDelete: Restrict)
+  receivableChequeType     ReceivableChequeType?     @relation(fields: [receivableChequeTypeId], references: [id], onDelete: Restrict)
+  payableChequeType        PayableChequeType?        @relation(fields: [payableChequeTypeId], references: [id], onDelete: Restrict)
+  receiptType              ReceiptType?              @relation(fields: [receiptTypeId], references: [id], onDelete: Restrict)
+  paymentType              PaymentType?              @relation(fields: [paymentTypeId], references: [id], onDelete: Restrict)
+  pettyCash                PettyCash?                @relation(fields: [pettyCashId], references: [id], onDelete: Restrict)
+  guaranteeType            GuaranteeType?            @relation(fields: [guaranteeTypeId], references: [id], onDelete: Restrict)
   guaranteeAccountingLines GuaranteeAccountingLine[]
-  usages                 AccountingSettingUsage[]
+  usages                   AccountingSettingUsage[]
 
   @@unique([accountType, bankAccountId, effectiveDate])
   @@unique([accountType, cashBoxId, effectiveDate])
@@ -2012,7 +2052,7 @@ model InquiryEvaluationItemLine {
 }
 
 model PurchaseOrder {
-  guaranteeDocuments GuaranteeDocument[]
+  guaranteeDocuments     GuaranteeDocument[]
   paymentSettlementLines PaymentSettlementLine[]
   id                     Int                     @id @default(autoincrement())
   fiscalPeriodId         Int
@@ -2522,6 +2562,7 @@ model SalesQuoteLostReason {
 }
 
 model SalesQuoteLine {
+  productionOrders  ProductionOrder[]
   id                Int                     @id @default(autoincrement())
   salesQuoteId      Int
   rowOrder          Int                     @default(0)
@@ -2676,6 +2717,7 @@ model SalesOrder {
 }
 
 model SalesOrderLine {
+  productionOrders       ProductionOrder[]
   id                     Int                     @id @default(autoincrement())
   salesOrderId           Int
   rowOrder               Int                     @default(0)
@@ -2791,9 +2833,13 @@ enum InventoryBasis {
   WAREHOUSE_TRANSFER_OUT
   // رسید انبار خرید بر مبنای رسید موقت (انبار قرنطینه ← انبار مواد؛ کنترل برابری انبار ندارد)
   TEMP_RECEIPT
+  // رسید تولید بر مبنای آمار تولید (ردیف‌ها به ProductionStatLine ارجاع می‌دهند)
+  PRODUCTION_STAT
 }
 
 model InventoryDocument {
+  productionOrderId Int?
+  productionOrder   ProductionOrder?          @relation(fields: [productionOrderId], references: [id])
   id                Int                       @id @default(autoincrement())
   documentType      InventoryDocumentType
   warehouseId       Int?
@@ -2863,6 +2909,7 @@ model InventoryDocumentLine {
   sourceWarehouseTransferOutLineId  Int?
   // برگشت رسید موقت و رسید انبار خرید با مبنای رسید موقت به ردیف رسید موقت ارجاع می‌دهند
   sourceTempReceiptLineId           Int?
+  sourceProductionStatLineId        Int?
   document                          InventoryDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
   goodsItem                         GoodsItem                  @relation(fields: [goodsItemId], references: [id])
   unit                              UnitOfMeasure              @relation(fields: [unitId], references: [id])
@@ -2891,6 +2938,7 @@ model InventoryDocumentLine {
   transferInLines                   InventoryDocumentLine[]    @relation("InventoryLineSourceWarehouseTransferOutLine")
   sourceTempReceiptLine             InventoryDocumentLine?     @relation("InventoryLineSourceTempReceiptLine", fields: [sourceTempReceiptLineId], references: [id], onDelete: Restrict)
   tempReceiptDerivedLines           InventoryDocumentLine[]    @relation("InventoryLineSourceTempReceiptLine")
+  sourceProductionStatLine          ProductionStatLine?        @relation(fields: [sourceProductionStatLineId], references: [id], onDelete: Restrict)
   serials                           InventoryLineSerial[]
   batches                           InventoryLineBatch[]
   purchaseInvoiceLine               PurchaseInvoiceLine?       @relation("PurchaseInvoiceSourceInventoryLine")
@@ -3029,6 +3077,7 @@ model GoodsPricingStatus {
 // خرید) یک ردیف تازه اضافه می‌کند. مبلغ فعلی یک ردیف = SUM(difference)، فی واحد = آن مجموع ÷ مقدار —
 // نگاه کنید به services/documentItemAmountService.ts (تنها نقطه‌ی نوشتن/خواندن این جدول).
 enum DocumentAmountPriceType {
+  PRODUCTION_COSTING // مبلغ رسید تولید که «محاسبه‌ی بهای تمام‌شده‌ی تولید» می‌نویسد
   USER_ENTRY // مبلغ دستی کاربر (۴ نوع سند کاربر-قیمت‌گذار: موجودی اول دوره/رسید انبار خرید/رسید تولید/اضافات انبارگردانی)
   ENGINE_PRICING // موتور قیمت‌گذاری (کاردکس میانگین موزون) — ردیف در دوره‌ی هنوز قفل‌نشده
   ENGINE_CORRECTION // موتور قیمت‌گذاری روی ردیفی که قبلاً در دوره‌ای زودتر قفل شده بود (اصلاحیه)
@@ -3647,6 +3696,7 @@ enum JournalEntryStatus {
 }
 
 enum IssuingSystem {
+  PRODUCTION
   FIXED_ASSET
   PAYROLL
   ACCOUNTING
@@ -3684,6 +3734,7 @@ enum GoodsAttributeTitleEffect {
 }
 
 enum GoodsAccountType {
+  PRODUCTION_WIP // کالای در جریان ساخت (فقط بدون کلید؛ سند بهای تمام‌شده‌ی تولید)
   SALES_VAT
   SALES_RECEIVABLE
   SALES_RETURN
@@ -4030,18 +4081,18 @@ model ChequeClearingPayableLine {
 // اول دوره، هم به ارز حساب/صندوق و هم به ارز پایه). هم برای استقرار اولیه (ورود دستی) و هم برای انتقال پایان سال (ایجاد
 // خودکار توسط «بستن سال دریافت و پرداخت») استفاده می‌شود.
 model TreasuryOpening {
-  id                Int                          @id @default(autoincrement())
-  fiscalPeriodId    Int                          @unique
-  date              DateTime                     @db.Date
+  id                 Int                          @id @default(autoincrement())
+  fiscalPeriodId     Int                          @unique
+  date               DateTime                     @db.Date
   /// true = افتتاحیه را «عملیات پایان دوره»ی دوره‌ی قبل ساخته؛ کاملاً فقط‌خواندنی است (ایجاد/ویرایش/حذف فقط با بستن/بازگشایی در دوره‌ی قبل).
   /// false = افتتاحیه‌ی دستی (استقرار اولیه): در کل سیستم فقط یکی، و فقط وقتی هیچ افتتاحیه‌ی سیستمی وجود ندارد قابل ایجاد است.
-  isSystemGenerated Boolean                      @default(false)
-  createdAt         DateTime                     @default(now())
-  updatedAt         DateTime                     @default(now()) @updatedAt
-  fiscalPeriod      FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
-  bankAccountLines  TreasuryOpeningBankAccount[]
-  cashBoxLines      TreasuryOpeningCashBox[]
-  pettyCashLines    TreasuryOpeningPettyCash[]
+  isSystemGenerated  Boolean                      @default(false)
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @default(now()) @updatedAt
+  fiscalPeriod       FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
+  bankAccountLines   TreasuryOpeningBankAccount[]
+  cashBoxLines       TreasuryOpeningCashBox[]
+  pettyCashLines     TreasuryOpeningPettyCash[]
   /// ضمانت‌نامه‌های افتتاحیه (استقرار): سندهای دریافت/پرداخت تضمینِ علامت‌دار با openingId — به‌ازای هر جهت و هر طرف‌حساب یک سند (services/guaranteeOpeningService.ts)
   guaranteeDocuments GuaranteeDocument[]
 }
@@ -5100,6 +5151,8 @@ model Position {
 model Employee {
   paymentPrepLines              PayrollPaymentPrepLine[]
   attendancePunches             AttendancePunch[]
+  deviceMappings                AttendanceDeviceMapping[]
+  deviceInbox                   AttendanceDeviceInbox[]
   attendanceCorrections         AttendanceCorrectionRequest[]
   attendanceLeaveRequests       AttendanceLeaveRequest[]
   attendanceMissionRequests     AttendanceMissionRequest[]
@@ -6516,6 +6569,73 @@ model WorkflowNotification {
   @@index([userId, readAt])
 }
 
+// ── مدیریت تردد: دریافت خودکار تردد از سیستم‌های کارت‌ساعت (برنامه‌ی ویندوزی «عامل تردد» + API دریافت) ──
+
+/// یک اتصال = یک سیستم/دیتابیس کارت‌ساعت؛ توکن API فقط به صورت هش نگه‌داری می‌شود (متن توکن یک بار هنگام ساخت نمایش داده می‌شود)
+model AttendanceDeviceConnection {
+  id             Int                       @id @default(autoincrement())
+  name           String                    @unique
+  isActive       Boolean                   @default(true)
+  description    String?
+  tokenHash      String                    @unique
+  /// چند نویسه‌ی آخر توکن، فقط برای شناسایی در فهرست
+  tokenHint      String
+  lastReceivedAt DateTime?
+  createdById    Int?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  mappings       AttendanceDeviceMapping[]
+  inbox          AttendanceDeviceInbox[]
+}
+
+/// نگاشت «شناسه‌ی کاربر در دستگاه» ← کارمند (به ازای هر اتصال)
+model AttendanceDeviceMapping {
+  id           Int                        @id @default(autoincrement())
+  connectionId Int
+  deviceUserId String
+  employeeId   Int
+  createdById  Int?
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  connection   AttendanceDeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  employee     Employee                   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([connectionId, deviceUserId])
+  @@index([employeeId])
+}
+
+enum AttendanceInboxStatus {
+  /// به تردد تبدیل شد (یا همان تردد از قبل بود)
+  ACCEPTED
+  /// شناسه‌ی دستگاه به کارمندی نگاشت نشده؛ با نگاشت/پردازش مجدد پردازش می‌شود
+  PENDING_MAPPING
+  /// رد شد (خارج از دوره‌ی همکاری، ماه قفل‌شده با «محاسبه تردد» و ...)؛ پس از رفع علت با «پردازش مجدد» دوباره امتحان می‌شود
+  REJECTED
+}
+
+/// هر ثبت دریافتی از دستگاه یک بار نگه‌داری می‌شود (یکتا به ازای اتصال + شناسه + روز + دقیقه) تا ارسال تکراری بی‌اثر باشد و ثبت‌های نگاشت‌نشده/ردشده گم نشوند
+model AttendanceDeviceInbox {
+  id           Int                        @id @default(autoincrement())
+  connectionId Int
+  deviceUserId String
+  date         DateTime                   @db.Date
+  minute       Int
+  deviceName   String?
+  status       AttendanceInboxStatus      @default(PENDING_MAPPING)
+  reason       String?
+  employeeId   Int?
+  punchId      Int?
+  receivedAt   DateTime                   @default(now())
+  processedAt  DateTime?
+  connection   AttendanceDeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  employee     Employee?                  @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  punch        AttendancePunch?           @relation(fields: [punchId], references: [id], onDelete: SetNull)
+
+  @@unique([connectionId, deviceUserId, date, minute])
+  @@index([connectionId, status])
+  @@index([status, date])
+}
+
 // ── مدیریت تردد: تردد خام و درخواست اصلاح تردد (فاز ۱) ──
 
 enum AttendancePunchSource {
@@ -6553,6 +6673,7 @@ model AttendancePunch {
   updatedAt           DateTime                     @updatedAt
   employee            Employee                     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   correctionRequest   AttendanceCorrectionRequest? @relation(fields: [correctionRequestId], references: [id], onDelete: Cascade)
+  deviceInbox         AttendanceDeviceInbox[]
 
   @@unique([employeeId, date, minute])
   @@index([date])
@@ -7935,7 +8056,7 @@ model AssetReceiptLine {
   amounts                           AssetReceiptLineAmount[]
 }
 
-/// پلاک دارایی (هر واحد یک پلاک). کد پلاک = کد تفصیلی نوع «دارایی ثابت».
+/// پلاک دارایی (هر واحد یک پلاک). detailCode = «کد پلاک» (عدد ۶ رقمی ترتیبی)؛ از v1.53.3 نوع تفصیل ندارد و کد تفصیلی نیست (نام ستون برای سازگاری مانده).
 model FixedAsset {
   insurancePolicyItems           AssetInsurancePolicyItem[]
   insuranceItems                 AssetInsuranceItem[]
@@ -8606,13 +8727,13 @@ enum GuaranteeDirection {
 /// «نوع تضمین» (مدیریت خزانه › تنظیمات)؛ کد خودکار (آخرین + ۱)، عنوان یکتا
 model GuaranteeType {
   accountSettings TreasuryAccountSetting[]
-  instruments GuaranteeInstrument[]
-  id        Int                @id @default(autoincrement())
-  code      Int                @unique
-  direction GuaranteeDirection
-  title     String             @unique
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
+  instruments     GuaranteeInstrument[]
+  id              Int                      @id @default(autoincrement())
+  code            Int                      @unique
+  direction       GuaranteeDirection
+  title           String                   @unique
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
 }
 
 enum GuaranteeBasis {
@@ -8629,33 +8750,33 @@ enum GuaranteeInstrumentType {
 /// «دریافت تضمین» / «پرداخت تضمین» (مدیریت خزانه › تضامین)؛ شماره در هر دوره مالی و برای هر جهت جدا (آخرین + ۱).
 /// جهت RECEIPT: صندوق دارد و مبنا می‌تواند سفارش خرید باشد؛ PAYMENT: بدون صندوق و همیشه بدون مبنا.
 model GuaranteeDocument {
-  id              Int                   @id @default(autoincrement())
-  direction       GuaranteeDirection
-  fiscalPeriodId  Int
-  number          Int
-  date            DateTime              @db.Date
-  partyId         Int
-  basis           GuaranteeBasis        @default(NO_BASIS)
-  purchaseOrderId Int?
-  cashBoxId       Int?
-  description     String?
+  id                     Int                       @id @default(autoincrement())
+  direction              GuaranteeDirection
+  fiscalPeriodId         Int
+  number                 Int
+  date                   DateTime                  @db.Date
+  partyId                Int
+  basis                  GuaranteeBasis            @default(NO_BASIS)
+  purchaseOrderId        Int?
+  cashBoxId              Int?
+  description            String?
   /// تایید حسابداری و سند صادرشده (services/guaranteeJournalEntryService.ts)
-  accountingStatus       AccountingApprovalStatus @default(NONE)
+  accountingStatus       AccountingApprovalStatus  @default(NONE)
   accountingApprovedAt   DateTime?
   accountingApprovedById Int?
-  journalEntryId         Int?                     @unique
-  journalEntry           JournalEntry?            @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  journalEntryId         Int?                      @unique
+  journalEntry           JournalEntry?             @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   accountingLines        GuaranteeAccountingLine[]
   /// سند افتتاحیه (ساخته‌شده از «عملیات اول دوره»): بدون تایید حسابداری و سند؛ ردیف‌های حسابداری‌اش موقع ثبت افتتاحیه ساخته می‌شود
   openingId              Int?
-  opening                TreasuryOpening?         @relation(fields: [openingId], references: [id], onDelete: Restrict)
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  fiscalPeriod    FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
-  party           Party                 @relation(fields: [partyId], references: [id])
-  purchaseOrder   PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
-  cashBox         CashBox?              @relation(fields: [cashBoxId], references: [id])
-  instruments     GuaranteeInstrument[]
+  opening                TreasuryOpening?          @relation(fields: [openingId], references: [id], onDelete: Restrict)
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  fiscalPeriod           FiscalPeriod              @relation(fields: [fiscalPeriodId], references: [id])
+  party                  Party                     @relation(fields: [partyId], references: [id])
+  purchaseOrder          PurchaseOrder?            @relation(fields: [purchaseOrderId], references: [id])
+  cashBox                CashBox?                  @relation(fields: [cashBoxId], references: [id])
+  instruments            GuaranteeInstrument[]
 
   @@unique([direction, fiscalPeriodId, number])
   @@index([openingId])
@@ -8663,21 +8784,21 @@ model GuaranteeDocument {
 
 /// ابزار تضمین: چک / سفته / ضمانت‌نامه (فیلدهای هر نوع در routes/guarantees.ts اعتبارسنجی می‌شود)
 model GuaranteeInstrument {
-  returnLine GuaranteeReturnLine?
-  operationLines GuaranteeOperationLine[]
-  extensionLines GuaranteeExtensionLine[]
-  id              Int                     @id @default(autoincrement())
+  returnLine      GuaranteeReturnLine?
+  operationLines  GuaranteeOperationLine[]
+  extensionLines  GuaranteeExtensionLine[]
+  id              Int                       @id @default(autoincrement())
   documentId      Int
-  rowOrder        Int                     @default(0)
+  rowOrder        Int                       @default(0)
   type            GuaranteeInstrumentType
   number          String
   guaranteeTypeId Int
-  dueDate         DateTime?               @db.Date
+  dueDate         DateTime?                 @db.Date
   series          String?
-  amount          Decimal                 @db.Decimal(18, 2)
+  amount          Decimal                   @db.Decimal(18, 2)
   currencyId      Int
-  fxRate          Decimal                 @default(1) @db.Decimal(18, 6)
-  baseAmount      Decimal                 @db.Decimal(36, 10)
+  fxRate          Decimal                   @default(1) @db.Decimal(18, 6)
+  baseAmount      Decimal                   @db.Decimal(36, 10)
   /// چک دریافتی: شعبه‌ی بانک
   bankBranchId    Int?
   /// چک پرداختی و ضمانت‌نامه‌ی پرداختی: حساب بانکی خودمان
@@ -8687,12 +8808,12 @@ model GuaranteeInstrument {
   branchCode      String?
   branchName      String?
   description     String?
-  document        GuaranteeDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  guaranteeType   GuaranteeType           @relation(fields: [guaranteeTypeId], references: [id], onDelete: Restrict)
-  currency        Currency                @relation(fields: [currencyId], references: [id])
-  bankBranch      BankBranch?             @relation(fields: [bankBranchId], references: [id])
-  bankAccount     BankAccount?            @relation(fields: [bankAccountId], references: [id])
-  bankParty       Party?                  @relation("GuaranteeInstrumentBank", fields: [bankPartyId], references: [id])
+  document        GuaranteeDocument         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  guaranteeType   GuaranteeType             @relation(fields: [guaranteeTypeId], references: [id], onDelete: Restrict)
+  currency        Currency                  @relation(fields: [currencyId], references: [id])
+  bankBranch      BankBranch?               @relation(fields: [bankBranchId], references: [id])
+  bankAccount     BankAccount?              @relation(fields: [bankAccountId], references: [id])
+  bankParty       Party?                    @relation("GuaranteeInstrumentBank", fields: [bankPartyId], references: [id])
   accountingLines GuaranteeAccountingLine[]
 }
 
@@ -8728,19 +8849,19 @@ model GuaranteeAccountingLine {
 /// «استرداد دریافت تضمین» / «استرداد پرداخت تضمین»: فقط ابزار چک و سفته؛ سند حسابداری = معکوسِ ردیف‌های حسابداریِ سند دریافت/پرداختِ اصلی
 /// (services/guaranteeReturnJournalService.ts). شماره در هر دوره مالی و هر جهت جدا (آخرین + ۱).
 model GuaranteeReturn {
-  id             Int                    @id @default(autoincrement())
+  id             Int                   @id @default(autoincrement())
   direction      GuaranteeDirection
   fiscalPeriodId Int
   number         Int
-  date           DateTime               @db.Date
+  date           DateTime              @db.Date
   partyId        Int
   description    String?
-  journalEntryId Int?                   @unique
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
-  fiscalPeriod   FiscalPeriod           @relation(fields: [fiscalPeriodId], references: [id])
-  party          Party                  @relation(fields: [partyId], references: [id])
-  journalEntry   JournalEntry?          @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  journalEntryId Int?                  @unique
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  party          Party                 @relation(fields: [partyId], references: [id])
+  journalEntry   JournalEntry?         @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   lines          GuaranteeReturnLine[]
 
   @@unique([direction, fiscalPeriodId, number])
@@ -8777,20 +8898,20 @@ enum GuaranteeOperationKind {
 /// «عملیات ضمانت‌نامه‌ی دریافتی/پرداختی» (تقلیل، افزایش، ابطال): فقط ابزار ضمانت‌نامه؛ هر سند یک نوع عملیات دارد و سند حسابداری دارد
 /// (services/guaranteeOperationJournalService.ts). مبلغ/وضعیت فعلیِ ابزار ذخیره نمی‌شود و از روی ابزار + عملیات‌ها و تمدیدها محاسبه می‌شود (services/guaranteeOperationService.ts).
 model GuaranteeOperation {
-  id             Int                     @id @default(autoincrement())
+  id             Int                      @id @default(autoincrement())
   direction      GuaranteeDirection
   fiscalPeriodId Int
   number         Int
-  date           DateTime                @db.Date
+  date           DateTime                 @db.Date
   partyId        Int
   kind           GuaranteeOperationKind
   description    String?
-  journalEntryId Int?                    @unique
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  fiscalPeriod   FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
-  party          Party                   @relation(fields: [partyId], references: [id])
-  journalEntry   JournalEntry?           @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  journalEntryId Int?                     @unique
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  fiscalPeriod   FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
+  party          Party                    @relation(fields: [partyId], references: [id])
+  journalEntry   JournalEntry?            @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   lines          GuaranteeOperationLine[]
 
   @@unique([direction, fiscalPeriodId, number])
@@ -8874,4 +8995,591 @@ model CashBoxTransferLine {
 
   @@index([transferId])
   @@index([chequeItemId])
+}
+
+// ═════════════════════════ تولید (ماژول لایسنسی production؛ طرح: Documents/طرح ماژول تولید.md) ═════════════════════════
+
+enum ProductionOrderStatus {
+  DRAFT
+  RELEASED
+  CLOSED
+}
+
+/// مبنای تسهیم هزینه‌ی هر معین بین کالاهای مرکز: تعداد تولید، بهای مواد کالا، یا یکی از «مبناهای زمانی» تعریف‌شده (CostTimeDriver)
+enum CostRuleBasis {
+  QUANTITY
+  MATERIAL_COST
+  TIME_DRIVER
+}
+
+enum WipCountKind {
+  PERIOD_END
+  OPENING
+}
+
+enum WipCountStatus {
+  DRAFT
+  APPROVED
+}
+
+enum MrpPlannedType {
+  MAKE
+  BUY
+}
+
+enum MrpPlannedStatus {
+  OPEN
+  CONVERTED
+}
+
+/// فرمول ساخت (BOM): نسخه‌ی تاریخ‌دار یک کالای تولیدی؛ نسخه‌ای که دستور تولید به آن وصل است قفل است
+model Bom {
+  id             Int               @id @default(autoincrement())
+  number         Int               @unique
+  outputItemId   Int
+  /// مقدار خروجی که مقدارهای ردیف‌ها برای آن نوشته شده‌اند
+  outputQuantity Decimal           @default(1) @db.Decimal(36, 10)
+  effectiveDate  DateTime          @db.Date
+  description    String?
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  outputItem     GoodsItem         @relation("BomOutput", fields: [outputItemId], references: [id])
+  lines          BomLine[]
+  orders         ProductionOrder[]
+  wipLines       WipCountLine[]
+  statLines      ProductionStatLine[]
+
+  @@unique([outputItemId, effectiveDate])
+}
+
+model BomLine {
+  id              Int               @id @default(autoincrement())
+  bomId           Int
+  componentItemId Int
+  /// مقدار جزء برای outputQuantity خروجی (به واحد اصلی جزء)، بدون ضایعات
+  quantity        Decimal           @db.Decimal(36, 10)
+  scrapPercent    Decimal           @default(0) @db.Decimal(10, 4)
+  note            String?
+  /// برگ ساختار بهای تمام‌شده (زیر «مواد» برای ماده‌ی اولیه، زیر «انتقالی» برای نیمه‌ساخته)
+  costNodeId      Int
+  bom             Bom               @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  componentItem   GoodsItem         @relation("BomComponent", fields: [componentItemId], references: [id])
+  costNode        CostStructureNode @relation(fields: [costNodeId], references: [id])
+
+  @@index([bomId])
+}
+
+/// دستور تولید: مرکز هزینه‌ی بهای تمام‌شده؛ اتصال به ردیف سفارش فروش/پیش‌فاکتور = تولید سفارشی، بدون اتصال = برای انبار
+model ProductionOrder {
+  id                Int                   @id @default(autoincrement())
+  number            Int
+  fiscalPeriodId    Int
+  date              DateTime              @db.Date
+  outputItemId      Int
+  quantity          Decimal               @db.Decimal(36, 10)
+  status            ProductionOrderStatus @default(DRAFT)
+  bomId             Int?
+  salesOrderLineId  Int?
+  salesQuoteLineId  Int?
+  plannedStart      DateTime?             @db.Date
+  plannedEnd        DateTime?             @db.Date
+  description       String?
+  mrpPlannedOrderId Int?                  @unique
+  /// دستور مادر (اختیاری): این دستور برای کسری اجزای آن ساخته شده است
+  parentOrderId     Int?
+  closedAt          DateTime?
+  createdById       Int?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  parentOrder       ProductionOrder?      @relation("ProductionOrderTree", fields: [parentOrderId], references: [id])
+  childOrders       ProductionOrder[]     @relation("ProductionOrderTree")
+  fiscalPeriod      FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  outputItem        GoodsItem             @relation(fields: [outputItemId], references: [id])
+  bom               Bom?                  @relation(fields: [bomId], references: [id])
+  salesOrderLine    SalesOrderLine?       @relation(fields: [salesOrderLineId], references: [id])
+  salesQuoteLine    SalesQuoteLine?       @relation(fields: [salesQuoteLineId], references: [id])
+  mrpPlannedOrder   MrpPlannedOrder?      @relation(fields: [mrpPlannedOrderId], references: [id])
+  lines             ProductionOrderLine[]
+  documents         InventoryDocument[]
+  statLines         ProductionStatLine[]
+  costItems         ProductionCostItem[]
+  batches           Batch[]               @relation("BatchProductionOrder")
+
+  @@unique([fiscalPeriodId, number])
+  @@index([parentOrderId])
+}
+
+model ProductionOrderLine {
+  id              Int             @id @default(autoincrement())
+  orderId         Int
+  componentItemId Int
+  /// مقدار کل لازم برای مقدار دستور (با ضایعات)
+  quantity        Decimal         @db.Decimal(36, 10)
+  note            String?
+  order           ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  componentItem   GoodsItem       @relation(fields: [componentItemId], references: [id])
+
+  @@index([orderId])
+}
+
+/// ریشه‌های ساختار بهای تمام‌شده (چهار ریشه‌ی سیستمی)
+enum CostStructureRoot {
+  MATERIAL
+  TRANSFERRED
+  LABOR
+  OVERHEAD
+}
+
+/// رفتار هزینه (فعلاً فقط گزارشی)
+enum CostBehavior {
+  FIXED
+  VARIABLE
+}
+
+/// ساختار بهای تمام‌شده: درخت با چهار ریشه‌ی سیستمی (مواد، انتقالی، دستمزد، سربار) و زیرشاخه‌های کاربر (حداکثر عمق ۳)؛
+/// برگ‌های مواد/انتقالی در ردیف فرمول ساخت و برگ‌های دستمزد/سربار («عامل جمع‌آوری») در قاعده‌ی معین انتخاب می‌شوند
+model CostStructureNode {
+  id               Int                         @id @default(autoincrement())
+  parentId         Int?
+  root             CostStructureRoot
+  title            String
+  isSystem         Boolean                     @default(false)
+  isActive         Boolean                     @default(true)
+  parent           CostStructureNode?          @relation("CostStructureTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children         CostStructureNode[]         @relation("CostStructureTree")
+  accountRules     CostAccountRule[]
+  bomLines         BomLine[]
+  components       ProductionCostComponent[]
+
+  @@unique([parentId, title])
+  @@index([parentId])
+}
+
+/// قاعده‌ی تاریخ‌دار معین: از «دوره‌ی گزارشگری شروع» به بعد این معین به این عامل جمع‌آوری (برگ دستمزد/سربار) می‌رود؛
+/// nodeId خالی = از این دوره به بعد جزو هزینه‌یابی نیست. معین‌هایی که قاعده ندارند اصلاً وارد هزینه‌یابی نمی‌شوند
+model CostAccountRule {
+  id                    Int                @id @default(autoincrement())
+  accountId             Int
+  fromReportingPeriodId Int
+  nodeId                Int?
+  behavior              CostBehavior       @default(VARIABLE)
+  basis                 CostRuleBasis
+  /// فقط وقتی basis = TIME_DRIVER (CHECK در مهاجرت)
+  driverId              Int?
+  createdAt             DateTime           @default(now())
+  driver                CostTimeDriver?    @relation(fields: [driverId], references: [id])
+  account               Account            @relation(fields: [accountId], references: [id])
+  fromPeriod            ReportingPeriod    @relation(fields: [fromReportingPeriodId], references: [id])
+  node                  CostStructureNode? @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+
+  @@unique([accountId, fromReportingPeriodId])
+  @@index([nodeId])
+  @@index([driverId])
+}
+
+/// مبنای زمانی تسهیم (مثلاً زمان بافت، زمان دوخت، زمان ماشین)؛ زمان هر کالا در هر مرکز در «زمان‌بندی تولید» ثبت می‌شود
+model CostTimeDriver {
+  id        Int                  @id @default(autoincrement())
+  code      Int                  @unique
+  title     String               @unique
+  isActive  Boolean              @default(true)
+  /// مبنای سیستمی («زمان ساخت»): سید/مهاجرت می‌سازد؛ حذف و تغییر عنوان نمی‌شود
+  isSystem  Boolean              @default(false)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  rules     CostAccountRule[]
+  lines     ProductionTimeLine[]
+}
+
+/// زمان‌بندی تولید: برای یک مرکز هزینه از «تاریخ اجرا» به بعد، زمان استاندارد هر کالا به تفکیک مبنای زمانی؛
+/// مقدار مؤثر هر (مرکز، کالا، مبنا) در یک تاریخ = ردیف آخرین برگه‌ای که آن را دارد و تاریخ اجرایش ≤ آن تاریخ است (برای هر ردیف آمار: تاریخ آمار)
+model ProductionTimeSheet {
+  id                    Int                  @id @default(autoincrement())
+  costCenterId          Int
+  effectiveDate         DateTime             @db.Date
+  description           String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  costCenter            CostCenter           @relation(fields: [costCenterId], references: [id])
+  lines                 ProductionTimeLine[]
+
+  @@unique([costCenterId, effectiveDate])
+}
+
+model ProductionTimeLine {
+  id             Int                 @id @default(autoincrement())
+  sheetId        Int
+  goodsItemId    Int
+  driverId       Int
+  /// «برای تولید»: مقدار پایه (به واحد اصلی کالا) که زمان برای آن نوشته شده، مثلاً ۲۴۰۰ کیلو؛ زمان هر واحد = minutes ÷ forQuantity (CHECK > 0)
+  forQuantity    Decimal             @default(1) @db.Decimal(36, 10)
+  /// زمان (دقیقه) برای forQuantity (صفر = این کالا از این مرحله عبور نمی‌کند)
+  minutes        Decimal             @db.Decimal(36, 10)
+  sheet          ProductionTimeSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  goodsItem      GoodsItem           @relation(fields: [goodsItemId], references: [id])
+  driver         CostTimeDriver      @relation(fields: [driverId], references: [id])
+
+  @@unique([sheetId, goodsItemId, driverId])
+  @@index([goodsItemId])
+  @@index([driverId])
+}
+
+/// موجودی پای کار (فرم آخر دوره/افتتاحیه)؛ کاربر می‌شمارد و وارد می‌کند
+model WipCount {
+  id                Int             @id @default(autoincrement())
+  number            Int             @unique
+  reportingPeriodId Int
+  kind              WipCountKind
+  status            WipCountStatus  @default(DRAFT)
+  description       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  reportingPeriod   ReportingPeriod @relation(fields: [reportingPeriodId], references: [id])
+  lines             WipCountLine[]
+
+  @@unique([reportingPeriodId, kind])
+}
+
+model WipCountLine {
+  id                     Int                     @id @default(autoincrement())
+  wipCountId             Int
+  /// مرکز هزینه‌ای که پای کار در آن است
+  costCenterId           Int
+  goodsItemId            Int
+  quantity               Decimal                 @db.Decimal(36, 10)
+  /// فقط برای محصول/نیمه‌ساخته‌ای که همین مرکز تولید می‌کند: خالی = ماده‌ی در جریان (قیمت از موجودی انبار)
+  completionPercent      Decimal?                @db.Decimal(10, 4)
+  /// فقط فرم افتتاحیه: ارزش مواد و ارزش تبدیلِ ردیف (کاربر وارد می‌کند؛ در فرم آخر دوره سیستم محاسبه می‌کند)
+  openingMaterialValue   Decimal?                @db.Decimal(36, 10)
+  openingConversionValue Decimal?                @db.Decimal(36, 10)
+  /// ردیف دارای درصد پیشرفت (هر دو نوع فرم): فرمول ساختی که این پای کار از آن می‌آید (الزامی)؛ ردیف ماده‌ی در جریان فرمول ندارد
+  bomId                  Int?
+  bom                    Bom?                    @relation(fields: [bomId], references: [id], onDelete: Restrict)
+  wipCount               WipCount                @relation(fields: [wipCountId], references: [id], onDelete: Cascade)
+  costCenter             CostCenter              @relation(fields: [costCenterId], references: [id])
+  goodsItem              GoodsItem               @relation(fields: [goodsItemId], references: [id])
+
+  @@index([wipCountId])
+}
+
+/// محاسبه‌ی بهای تمام‌شده‌ی تولید: یکی به ازای هر دوره‌ی گزارشگری
+model ProductionCostRun {
+  id                Int                            @id @default(autoincrement())
+  reportingPeriodId Int                            @unique
+  calculatedAt      DateTime                       @default(now())
+  calculatedById    Int?
+  journalEntryId    Int?                           @unique
+  warnings          Json?
+  /// کالاهایی که این محاسبه با priceItem قیمت زد (به ترتیب) و اسناد رسیدی که FINALIZED کرد؛ برای حذف محاسبه
+  pricedItemIds     Json?
+  finalizedDocIds   Json?
+  reportingPeriod   ReportingPeriod                @relation(fields: [reportingPeriodId], references: [id])
+  journalEntry      JournalEntry?                  @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  items             ProductionCostItem[]
+  centers           ProductionCostCenter[]
+  centerItems       ProductionCostCenterItem[]
+  accountAllocs     ProductionCostAccountAlloc[]
+  journalLines      ProductionCostJournalLine[]
+  components        ProductionCostComponent[]
+  centerMaterials   ProductionCostCenterMaterial[]
+}
+
+model ProductionCostItem {
+  id                   Int               @id @default(autoincrement())
+  runId                Int
+  productionOrderId    Int
+  outputItemId         Int
+  level                Int
+  openingWipMaterial   Decimal           @default(0) @db.Decimal(36, 10)
+  openingWipConversion Decimal           @default(0) @db.Decimal(36, 10)
+  /// مواد مصرفی دوره (اولیه + نیمه‌ساخته) منهای مواد پای کار آخر دوره
+  materialCost         Decimal           @default(0) @db.Decimal(36, 10)
+  conversionCost       Decimal           @default(0) @db.Decimal(36, 10)
+  finishedQty          Decimal           @default(0) @db.Decimal(36, 10)
+  wipQty               Decimal           @default(0) @db.Decimal(36, 10)
+  wipPercent           Decimal           @default(0) @db.Decimal(10, 4)
+  unitMaterial         Decimal           @default(0) @db.Decimal(36, 10)
+  unitConversion       Decimal           @default(0) @db.Decimal(36, 10)
+  receiptValue         Decimal           @default(0) @db.Decimal(36, 10)
+  endingWipMaterial    Decimal           @default(0) @db.Decimal(36, 10)
+  endingWipConversion  Decimal           @default(0) @db.Decimal(36, 10)
+  run                  ProductionCostRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  productionOrder      ProductionOrder   @relation(fields: [productionOrderId], references: [id])
+  outputItem           GoodsItem         @relation(fields: [outputItemId], references: [id])
+
+  @@unique([runId, productionOrderId])
+}
+
+/// تسهیم هر حساب معین (دارای قاعده) بین مراکز هزینه در یک محاسبه
+model ProductionCostAccountAlloc {
+  id           Int               @id @default(autoincrement())
+  runId        Int
+  accountId    Int
+  costCenterId Int
+  amount       Decimal           @db.Decimal(36, 10)
+  run          ProductionCostRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  account      Account           @relation(fields: [accountId], references: [id])
+  costCenter   CostCenter        @relation(fields: [costCenterId], references: [id])
+
+  @@index([runId])
+}
+
+/// خط‌های مبدأ برای سند حسابداری بهای تمام‌شده: مانده‌ی هر حساب/تفصیل که به مراکز تسهیم شد (بستانکار در سند)
+model ProductionCostJournalLine {
+  id          Int               @id @default(autoincrement())
+  runId       Int
+  accountId   Int
+  detail1Code String?
+  detail2Code String?
+  detail3Code String?
+  amount      Decimal           @db.Decimal(36, 10)
+  run         ProductionCostRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  account     Account           @relation(fields: [accountId], references: [id])
+
+  @@index([runId])
+}
+
+/// آمار تولید: مقدار تولیدشده‌ی هر مرکز هزینه در یک روز (مبنای رسید تولید و تحویل تولید و مخرج بهای تمام‌شده)
+model ProductionStat {
+  id             Int                  @id @default(autoincrement())
+  number         Int
+  fiscalPeriodId Int
+  date           DateTime             @db.Date
+  costCenterId   Int
+  description    String?
+  createdById    Int?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  fiscalPeriod   FiscalPeriod         @relation(fields: [fiscalPeriodId], references: [id])
+  costCenter     CostCenter           @relation(fields: [costCenterId], references: [id])
+  lines          ProductionStatLine[]
+
+  @@unique([fiscalPeriodId, number])
+  @@index([costCenterId, date])
+}
+
+model ProductionStatLine {
+  id                Int                      @id @default(autoincrement())
+  statId            Int
+  goodsItemId       Int
+  /// اختیاری: فقط برای انتساب تولید به دستور (گزارش بهای دستور و برنامه در برابر انجام)
+  productionOrderId Int?
+  /// تولید سالم (به واحد اصلی کالا)
+  quantity          Decimal                  @db.Decimal(36, 10)
+  scrapQuantity     Decimal                  @default(0) @db.Decimal(36, 10)
+  note              String?
+  /// فرمول ساخت (BOM) که این تولید از آن آمده؛ الزامی چون یک کالا هم‌زمان چند فرمول دارد و بهای تمام‌شده از همین فرمول استاندارد و ترکیب مواد را می‌گیرد
+  bomId             Int
+  bom               Bom                      @relation(fields: [bomId], references: [id], onDelete: Restrict)
+  /// بچ تولیدشده: برای کالای دارای ردیابی «بچ» الزامی است (سرور اگر نیامده باشد بچ دستور را به‌کار می‌برد یا بچ جدید می‌سازد)؛ رسید تولید همین بچ را می‌گیرد
+  batchId           Int?
+  batch             Batch?                   @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  stat              ProductionStat           @relation(fields: [statId], references: [id], onDelete: Cascade)
+  goodsItem         GoodsItem                @relation(fields: [goodsItemId], references: [id])
+  productionOrder   ProductionOrder?         @relation(fields: [productionOrderId], references: [id])
+  receiptLines      InventoryDocumentLine[]
+  deliveryLines     ProductionDeliveryLine[]
+
+  @@index([statId])
+  @@index([bomId])
+  @@index([batchId])
+}
+
+/// تحویل تولید: انتقال تولید (معمولاً نیمه‌ساخته) یک مرکز هزینه به مرکز بعدی؛ ارزش هنگام محاسبه‌ی بهای تمام‌شده نوشته می‌شود
+model ProductionDelivery {
+  id               Int                      @id @default(autoincrement())
+  number           Int
+  fiscalPeriodId   Int
+  date             DateTime                 @db.Date
+  fromCostCenterId Int
+  toCostCenterId   Int
+  description      String?
+  createdById      Int?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  fiscalPeriod     FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
+  fromCostCenter   CostCenter               @relation("ProductionDeliveryFrom", fields: [fromCostCenterId], references: [id])
+  toCostCenter     CostCenter               @relation("ProductionDeliveryTo", fields: [toCostCenterId], references: [id])
+  lines            ProductionDeliveryLine[]
+
+  @@unique([fiscalPeriodId, number])
+  @@index([fromCostCenterId, date])
+  @@index([toCostCenterId, date])
+}
+
+model ProductionDeliveryLine {
+  id          Int                @id @default(autoincrement())
+  deliveryId  Int
+  statLineId  Int
+  goodsItemId Int
+  quantity    Decimal            @db.Decimal(36, 10)
+  /// ارزش تحویل؛ فقط محاسبه‌ی بهای تمام‌شده می‌نویسد (خالی = هنوز ارزش‌گذاری نشده)
+  amount      Decimal?           @db.Decimal(36, 10)
+  note        String?
+  delivery    ProductionDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  statLine    ProductionStatLine @relation(fields: [statLineId], references: [id], onDelete: Restrict)
+  goodsItem   GoodsItem          @relation(fields: [goodsItemId], references: [id])
+
+  @@index([deliveryId])
+  @@index([statLineId])
+}
+
+/// نتیجه‌ی بهای تمام‌شده برای هر مرکز هزینه (سطح مرکز): مواد و تبدیل دوره، حمل‌شده‌ها به دوره‌ی بعد
+model ProductionCostCenter {
+  id                  Int               @id @default(autoincrement())
+  runId               Int
+  costCenterId        Int
+  level               Int               @default(0)
+  /// مواد مصرفی دوره (اولیه + نیمه‌ساخته از انبار) منهای ماده‌ی پای کار آخر دوره
+  materialCost        Decimal           @default(0) @db.Decimal(36, 10)
+  /// ارزش تحویل‌های دریافتی از مراکز قبل
+  transferredIn       Decimal           @default(0) @db.Decimal(36, 10)
+  /// هزینه‌ی تبدیل دوره: ردیف‌های سند معین‌های دارای قاعده که تفصیل همین مرکز را دارند
+  conversionCost      Decimal           @default(0) @db.Decimal(36, 10)
+  /// مانده‌ی جذب‌نشده‌ی مرکز (ماده‌ی کالای بدون کار و هزینه‌ی تبدیل بدون تولید)؛ اول دوره‌ی بعد به کالاهای مرکز تسهیم می‌شود
+  openCarryMaterial   Decimal           @default(0) @db.Decimal(36, 10)
+  openCarryConversion Decimal           @default(0) @db.Decimal(36, 10)
+  endCarryMaterial    Decimal           @default(0) @db.Decimal(36, 10)
+  endCarryConversion  Decimal           @default(0) @db.Decimal(36, 10)
+  run                 ProductionCostRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  costCenter          CostCenter        @relation(fields: [costCenterId], references: [id])
+
+  @@unique([runId, costCenterId])
+}
+
+model ProductionCostCenterItem {
+  id                   Int               @id @default(autoincrement())
+  runId                Int
+  costCenterId         Int
+  goodsItemId          Int
+  /// آمار تولید دوره (تولید سالم)
+  finishedQty          Decimal           @default(0) @db.Decimal(36, 10)
+  openingWipQty        Decimal           @default(0) @db.Decimal(36, 10)
+  openingWipPercent    Decimal           @default(0) @db.Decimal(10, 4)
+  openingWipMaterial   Decimal           @default(0) @db.Decimal(36, 10)
+  openingWipConversion Decimal           @default(0) @db.Decimal(36, 10)
+  wipQty               Decimal           @default(0) @db.Decimal(36, 10)
+  wipPercent           Decimal           @default(0) @db.Decimal(10, 4)
+  materialCost         Decimal           @default(0) @db.Decimal(36, 10)
+  /// بخشی از materialCost که نیمه‌ساخته‌ی تحویل‌گرفته از مرکز قبل است («هزینه‌ی انتقالی»؛ در گزارش از «مواد» جدا نشان داده می‌شود)
+  transferredCost      Decimal           @default(0) @db.Decimal(36, 10)
+  conversionCost       Decimal           @default(0) @db.Decimal(36, 10)
+  unitMaterial         Decimal           @default(0) @db.Decimal(36, 10)
+  unitConversion       Decimal           @default(0) @db.Decimal(36, 10)
+  /// ارزش تولید تمام‌شده‌ی دوره (مواد + تبدیل − پای کار آخر)
+  finishedValue        Decimal           @default(0) @db.Decimal(36, 10)
+  /// خروج از مرکز: رسید انبار و تحویل به مرکز بعد
+  receiptQty           Decimal           @default(0) @db.Decimal(36, 10)
+  receiptValue         Decimal           @default(0) @db.Decimal(36, 10)
+  deliveredQty         Decimal           @default(0) @db.Decimal(36, 10)
+  deliveredValue       Decimal           @default(0) @db.Decimal(36, 10)
+  /// تولیدشده‌ی ثبت‌شده در آمار که هنوز نه رسید شده نه تحویل (اول و آخر دوره)
+  heldOpenQty          Decimal           @default(0) @db.Decimal(36, 10)
+  heldOpenValue        Decimal           @default(0) @db.Decimal(36, 10)
+  heldEndQty           Decimal           @default(0) @db.Decimal(36, 10)
+  heldEndValue         Decimal           @default(0) @db.Decimal(36, 10)
+  endingWipMaterial    Decimal           @default(0) @db.Decimal(36, 10)
+  endingWipConversion  Decimal           @default(0) @db.Decimal(36, 10)
+  run                  ProductionCostRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  costCenter           CostCenter        @relation(fields: [costCenterId], references: [id])
+  goodsItem            GoodsItem         @relation(fields: [goodsItemId], references: [id])
+
+  @@unique([runId, costCenterId, goodsItemId])
+}
+
+/// پارامترهای برنامه‌ریزی کالا برای MRP
+model ItemPlanning {
+  id           Int       @id @default(autoincrement())
+  goodsItemId  Int       @unique
+  leadTimeDays Int       @default(0)
+  safetyStock  Decimal   @default(0) @db.Decimal(36, 10)
+  /// ضریب/حداقل اندازه‌ی سفارش؛ مقدار پیشنهادی به بالا به مضرب آن گرد می‌شود
+  lotSize      Decimal?  @db.Decimal(36, 10)
+  goodsItem    GoodsItem @relation(fields: [goodsItemId], references: [id])
+}
+
+model MrpRun {
+  id          Int               @id @default(autoincrement())
+  number      Int               @unique
+  date        DateTime          @db.Date
+  horizonEnd  DateTime          @db.Date
+  description String?
+  createdById Int?
+  createdAt   DateTime          @default(now())
+  planned     MrpPlannedOrder[]
+}
+
+model MrpPlannedOrder {
+  id              Int              @id @default(autoincrement())
+  runId           Int
+  goodsItemId     Int
+  type            MrpPlannedType
+  quantity        Decimal          @db.Decimal(36, 10)
+  dueDate         DateTime         @db.Date
+  releaseDate     DateTime         @db.Date
+  status          MrpPlannedStatus @default(OPEN)
+  note            String?
+  supplyRequestId Int?
+  run             MrpRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  goodsItem       GoodsItem        @relation(fields: [goodsItemId], references: [id])
+  productionOrder ProductionOrder?
+
+  @@index([runId])
+}
+
+/// اجزای بهای هر کالا در هر مرکز (ذخیره هنگام محاسبه): مواد هر جزء با مقدار/مبلغ واقعی و استاندارد (فرمول ساخت × تولید معادل) و
+/// هزینه‌ی تبدیل به تفکیک مخزن و حساب معین؛ انحراف = واقعی − استاندارد (به نسبت استانداردِ هر کالا بین کالاهای مرکز تقسیم شده)
+enum ProductionCostComponentKind {
+  MATERIAL
+  /// نیمه‌ساخته‌ی مصرفی (هزینه‌ی انتقالی)
+  TRANSFERRED
+  CARRY_MATERIAL
+  CONVERSION
+  CARRY_CONVERSION
+}
+
+model ProductionCostComponent {
+  id              Int                         @id @default(autoincrement())
+  runId           Int
+  costCenterId    Int
+  /// کالای تولیدی (خروجی) که این سهم به آن می‌رسد
+  goodsItemId     Int
+  kind            ProductionCostComponentKind
+  /// MATERIAL/TRANSFERRED: کالای جزء
+  componentItemId Int?
+  /// برگ ساختار بهای تمام‌شده (MATERIAL/TRANSFERRED: از ردیف فرمول ساخت؛ CONVERSION: از قاعده‌ی معین)
+  nodeId          Int?
+  /// CONVERSION: حساب معین
+  accountId       Int?
+  actualQty       Decimal                     @default(0) @db.Decimal(36, 10)
+  actualAmount    Decimal                     @default(0) @db.Decimal(36, 10)
+  standardQty     Decimal                     @default(0) @db.Decimal(36, 10)
+  standardAmount  Decimal                     @default(0) @db.Decimal(36, 10)
+  run             ProductionCostRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  costCenter      CostCenter                  @relation(fields: [costCenterId], references: [id])
+  goodsItem       GoodsItem                   @relation("CostComponentOutput", fields: [goodsItemId], references: [id])
+  componentItem   GoodsItem?                  @relation("CostComponentItem", fields: [componentItemId], references: [id])
+  node            CostStructureNode?          @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+  account         Account?                    @relation(fields: [accountId], references: [id])
+
+  @@index([runId])
+}
+
+/// ماده (یا نیمه‌ساخته)ی در جریانِ هر مرکز به تفکیک کالا: اول دوره (از دوره‌ی قبل یا فرم افتتاحیه) و آخر دوره.
+/// اولِ دوره به مصرف همان کالا در استخر مواد اضافه می‌شود تا سهم محصولات از روی فرمول ساخت و شاخه‌ی بها خودکار بیاید
+model ProductionCostCenterMaterial {
+  id           Int               @id @default(autoincrement())
+  runId        Int
+  costCenterId Int
+  goodsItemId  Int
+  openingQty   Decimal           @default(0) @db.Decimal(36, 10)
+  openingValue Decimal           @default(0) @db.Decimal(36, 10)
+  endingQty    Decimal           @default(0) @db.Decimal(36, 10)
+  endingValue  Decimal           @default(0) @db.Decimal(36, 10)
+  run          ProductionCostRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  costCenter   CostCenter        @relation(fields: [costCenterId], references: [id])
+  goodsItem    GoodsItem         @relation(fields: [goodsItemId], references: [id])
+
+  @@unique([runId, costCenterId, goodsItemId])
 }

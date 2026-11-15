@@ -94,6 +94,7 @@
   --nc-mod-store: #ff9f6b;
   --nc-mod-club: #e879f9;
   --nc-mod-asset: #d4a373;
+  --nc-mod-production: #f4a259;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -177,6 +178,7 @@
   --nc-mod-store: #ff9f6b;
   --nc-mod-club: #e879f9;
   --nc-mod-asset: #d4a373;
+  --nc-mod-production: #f4a259;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -334,6 +336,7 @@
   --nc-mod-store: #ff9f6b;
   --nc-mod-club: #e879f9;
   --nc-mod-asset: #d4a373;
+  --nc-mod-production: #f4a259;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -572,6 +575,7 @@ body {
 .module-icon.mod-ic-store { color: var(--nc-mod-store); }
 .module-icon.mod-ic-gift { color: var(--nc-mod-club); }
 .module-icon.mod-ic-building { color: var(--nc-mod-asset); }
+.module-icon.mod-ic-factory { color: var(--nc-mod-production); }
 
 .nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
 .submodule-title {
@@ -1805,7 +1809,7 @@ tbody tr:hover { background: var(--bg); }
 /* پیام موفقیتِ شناور (toast) — بیرون از جریان صفحه؛ چیدمان فرم‌ها را جابه‌جا نمی‌کند */
 .toast-host { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; flex-direction: column-reverse; gap: 8px; align-items: center; pointer-events: none; max-width: calc(100vw - 32px); }
 .toast { display: flex; align-items: center; gap: 12px; pointer-events: auto; background: var(--surface); color: var(--success); border: 1px solid var(--success); padding: 10px 14px 10px 10px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; box-shadow: var(--shadow-md); animation: toast-in 0.18s ease-out; }
-.toast.error { color: var(--danger); border-color: var(--danger); }
+.toast.error { color: var(--danger); border-color: var(--danger); white-space: pre-line; max-height: 60vh; overflow-y: auto; }
 /* دکمه‌ی بستن دستی پیام */
 .toast-close { background: none; border: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; opacity: .7; }
 .toast-close:hover { opacity: 1; }
@@ -2094,6 +2098,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --nc-mod-store: var(--icon-mono);
   --nc-mod-club: var(--icon-mono);
   --nc-mod-asset: var(--icon-mono);
+  --nc-mod-production: var(--icon-mono);
   --nc-sub-ops: var(--icon-mono);
   --nc-sub-structure: var(--icon-mono);
   --nc-sub-report: var(--icon-mono);
@@ -2360,7 +2365,9 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
     var(--bg);
 }
 .mg-shell { width: 100%; max-width: 560px; background: var(--surface); border-radius: 22px; overflow: hidden; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.06); }
-.mg-shell.wide { max-width: 1000px; }
+/* بعد از ورود، صفحه‌ی مدیریت کل عرض مانیتور را می‌گیرد (صفحه‌ی ورود لایسنس باریک می‌ماند) */
+.mg-shell.wide { max-width: none; }
+.mg-page:has(.mg-shell.wide) { padding: 16px; }
 .mg-head {
   position: relative; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 24px; color: #fff; overflow: hidden;
   background: linear-gradient(155deg, color-mix(in srgb, var(--primary) 82%, #ffffff) 0%, var(--primary) 45%, color-mix(in srgb, var(--primary) 55%, #000000) 100%);

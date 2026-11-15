@@ -17,6 +17,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { PlusIcon } from "../components/icons";
 
 // «رسید موقت» و «برگشت رسید موقت» (انبار › رسید موقت): دو سند فقط تعدادی (بدون فی/مبلغ و بدون سند حسابداری).
 // رسید موقت کالا را به انبار قرنطینه/QC وارد می‌کند (مبنا: سفارش خرید یا مجوز تحویل)؛ برگشت رسید موقت حتماً بر
@@ -101,14 +102,6 @@ const CFG = {
       "برگشت کالای ردشده در QC به تامین‌کننده. این سند حتماً بر مبنای ردیف‌های رسید موقت صادر می‌شود و فقط مانده‌ی رسید موقت قابل انتخاب است (انبار و تامین‌کننده‌ی هدر باید با رسید موقت یکی باشد). فقط تعدادی است.",
   },
 } as const;
-
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 export function TempDocs({ kind }: { kind: Kind }) {
   const location = useLocation();

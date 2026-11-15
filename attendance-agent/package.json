@@ -1,0 +1,27 @@
+{
+  "name": "attendance-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "عامل تردد: خواندن فقط‌خوانیِ دیتابیس کارت‌ساعت و ارسال ثبت‌های ورود/خروج به ERP",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "setup": "node src/agent.mjs setup",
+    "test-connection": "node src/agent.mjs test",
+    "preview": "node src/agent.mjs preview",
+    "once": "node src/agent.mjs once",
+    "start": "node src/agent.mjs run",
+    "selftest": "node test/selftest.mjs",
+    "build-installer": "node installer/build.mjs"
+  },
+  "dependencies": {
+    "mssql": "^10.0.2",
+    "mysql2": "^3.9.7",
+    "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

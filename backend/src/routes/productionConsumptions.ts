@@ -13,6 +13,7 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { assertProductionLink, assertProductionPeriodOpen } from "../services/productionDocService";
 
 const FORM = findFormPrefix("production-consumptions");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -47,6 +48,7 @@ interface LineInput {
 }
 
 interface HeaderBody {
+  productionOrderId?: number | null;
   warehouseId: number;
   date: string;
   costCenterId?: number | null;
@@ -182,6 +184,7 @@ router.get("/production-consumptions/:id", can(`${FORM}.view`), async (req: Auth
     status: d.status,
     finalizedAt: d.finalizedAt,
     updatedAt: d.updatedAt,
+    productionOrderId: d.productionOrderId ?? null,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       goodsItemId: l.goodsItemId,
@@ -210,6 +213,7 @@ export async function createProductionConsumption(body: HeaderBody) {
   if (!cc) throw new Error("مرکز هزینه یافت نشد");
   const cleanedLines = await validateLines(body.lines);
   const date = new Date(body.date);
+  await assertProductionLink(body.productionOrderId, date);
   const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
   const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
   const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -243,6 +247,7 @@ export async function createProductionConsumption(body: HeaderBody) {
         number,
         date,
         detailCode: cc.detailCode,
+        productionOrderId: body.productionOrderId || null,
         description: body.description || null,
         status: "REGISTERED",
         lines: {
@@ -283,6 +288,11 @@ router.put("/production-consumptions/:id", can(`${FORM}.edit`), async (req, res)
     include: { lines: { include: { serials: true } }, warehouse: true },
   });
   if (!existing) return res.status(404).json({ error: "سند مصرف تولید یافت نشد" });
+  try {
+    await assertProductionPeriodOpen(existing.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (existing.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل ویرایش نیست" });
   const existingSerialIds = new Set(existing.lines.flatMap((l: any) => l.serials.map((s: any) => s.serialId)));
 
@@ -302,6 +312,8 @@ router.put("/production-consumptions/:id", can(`${FORM}.edit`), async (req, res)
 
     const cleanedLines = await validateLines(body.lines, existingSerialIds);
     const date = new Date(body.date);
+    await assertProductionPeriodOpen(date);
+    await assertProductionLink(body.productionOrderId, date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
     const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -319,6 +331,7 @@ router.put("/production-consumptions/:id", can(`${FORM}.edit`), async (req, res)
           fiscalPeriodId: fiscalPeriod.id,
           date,
           detailCode: cc.detailCode,
+          productionOrderId: body.productionOrderId || null,
           description: body.description || null,
           lines: {
             create: cleanedLines.map((l, idx) => ({
@@ -350,6 +363,11 @@ router.delete("/production-consumptions/:id", can(`${FORM}.delete`), async (req,
   const id = Number(req.params.id);
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PRODUCTION_CONSUMPTION" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  try {
+    await assertProductionPeriodOpen(d.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (d.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل حذف نیست" });
 
   try {

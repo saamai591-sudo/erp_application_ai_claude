@@ -8,6 +8,7 @@ import { getEffectiveDecree } from "../services/employmentDecreeService";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getPeriods, periodContains } from "../services/employmentStatusService";
 import { decreeCandidateEmployees, previousDecree, validateDecreeCooperation } from "../services/decreeCooperationService";
+import { trimOrNull, parseIsoDay } from "../utils/inputParse";
 
 // منابع انسانی › پرسنلی › حکم کارگزینی (قرارداد و حکم یک سند است).
 // پیش‌نویس ⇄ تایید؛ حکم تاییدشده تغییر نمی‌کند (حکم جدید با تاریخ اعمال جدید صادر می‌شود). اعتبار از تاریخ اعمال تا min(پایان، روز قبل از حکم بعدی)
@@ -18,19 +19,7 @@ const router = Router();
 
 const TYPES = ["HIRE", "RENEWAL", "ANNUAL_RAISE", "PROMOTION", "AMENDMENT"];
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
-function parseDay(v: unknown, label: string, required = true): Date | null {
-  if (v === undefined || v === null || v === "") {
-    if (required) throw new HrError(`${label} الزامی است`);
-    return null;
-  }
-  const d = new Date(`${String(v)}T00:00:00.000Z`);
-  if (isNaN(d.getTime())) throw new HrError(`${label} نامعتبر است`);
-  return d;
-}
+const parseDay = (v: unknown, label: string, required = true): Date | null => parseIsoDay(v, label, (m) => new HrError(m), { required });
 function fullName(p: { firstName: string | null; lastName: string | null; name: string | null }) {
   return [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "";
 }
@@ -144,7 +133,7 @@ async function buildDraft(b: any, employeeId: number, excludeDecreeId?: number) 
       endDate,
       employmentTypeId: empType.id,
       weeklyHours,
-      description: str(b.description),
+      description: trimOrNull(b.description),
       ...assign,
     },
     lines: out,

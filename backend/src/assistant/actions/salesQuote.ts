@@ -4,12 +4,12 @@ import { findEffectivePriceListId, loadItemPricing, computePrice } from "../../s
 import { getVatRatePercentForDate } from "../../services/accountingSettingsService";
 import { computeLineVat, resolveVatRatePercent } from "../../utils/vatCalculation";
 import { ActionDef, AssistantContext, Block, EntityRef, LineValue } from "../types";
+import { roundToCurrencyDecimals } from "../../utils/currencyConversion";
 
 // «پیش‌فاکتور جدید»: مشتری + اقلام (+ تخفیف درصدی، نوع/مرکز فروش، شرح) ← فرم پیش‌فاکتور با اطلاعات کامل پیش‌پر باز می‌شود و کاربر خودش ذخیره می‌کند
 // (چیزی ثبت نمی‌شود). قیمت از اعلامیه‌ی قیمت (همان سرویس فرم)، مالیات با همان قاعده‌ی فرم، نوع/مرکز فروش پیش‌فرض = آخرین پیش‌فاکتور همین کاربر.
 
 const QUOTES = findFormPrefix("sales-quotes");
-const round2 = (v: number) => Math.round(v * 100) / 100;
 const fmt = (v: number) => v.toLocaleString("en-US");
 
 async function lastQuoteOf(ctx: AssistantContext) {
@@ -87,8 +87,8 @@ export const salesQuoteAction: ActionDef = {
       const computed = p ? computePrice(p, l.quantity) : null;
       const unitPrice = computed ? computed.listPrice : null;
       if (unitPrice === null) noPrice.push(item.title);
-      const amount = unitPrice === null ? 0 : round2(unitPrice * l.quantity);
-      const discount = unitPrice === null ? 0 : round2((amount * discountPercent) / 100);
+      const amount = unitPrice === null ? 0 : roundToCurrencyDecimals(unitPrice * l.quantity, 2);
+      const discount = unitPrice === null ? 0 : roundToCurrencyDecimals((amount * discountPercent) / 100, 2);
       const vat = unitPrice === null ? 0 : computeLineVat(amount, discount, resolveVatRatePercent(item as any, vatDefault), decimals);
       total += amount - discount + vat;
       rows.push({

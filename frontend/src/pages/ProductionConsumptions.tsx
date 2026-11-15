@@ -14,6 +14,7 @@ import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
+import { ProductionOrderField } from "../components/ProductionOrderField";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
@@ -23,6 +24,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { CostCenterPickerField } from "../components/TypePickerFields";
+import { PlusIcon } from "../components/icons";
 
 // «مصرف تولید» — طبق stockAnalysis.md بند ۳۴/۳۹/۴۲؛ این پروژه ماژول «تولید»/«دستور تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» است (نگاه کنید به یادداشت بالای backend/src/routes/productionConsumptions.ts).
@@ -51,7 +53,7 @@ interface CostCenterOption { id: number; detailCode: string; title: string; isAc
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; costCenterId: number | null; costCenterTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null; details?: DetailValueDto[] }
-interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; costCenterId: number | null; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
+interface Detail { id: number; number: number; date: string; productionOrderId?: number | null; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; costCenterId: number | null; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
 const INFO_TEXT = "ثبت مصرف تولید (خروج مواد اولیه از انبار برای مصرف در تولید) — برای تخصیص بهای تمام‌شده، این سند یک مرکز هزینه الزامی دارد. این سند همیشه بدون مبنا است؛ در صورت نیاز، شرح هر ردیف می‌تواند دستور تولید مربوطه را مشخص کند.";
@@ -65,10 +67,6 @@ export default function ProductionConsumptions() {
   if (isNew) return <ProductionConsumptionForm basePath={basePath} />;
   if (isEdit) return <ProductionConsumptionForm basePath={basePath} editId={Number(id)} />;
   return <ProductionConsumptionList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function ProductionConsumptionList({ basePath }: { basePath: string }) {
@@ -166,16 +164,16 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
 
   const detailConfig = useDocDetailConfig("PRODUCTION_CONSUMPTION");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
-    { date: string; warehouseId: string; costCenterId: string; description: string; details: DetailValues },
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
+    { date: string; warehouseId: string; costCenterId: string; productionOrderId: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "production-consumptions",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", costCenterId: "", description: "", details: {} }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", costCenterId: "", productionOrderId: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), costCenterId: d.costCenterId ? String(d.costCenterId) : "", description: d.description || "", details: detailsToValues(d.details) }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), costCenterId: d.costCenterId ? String(d.costCenterId) : "", productionOrderId: d.productionOrderId ? String(d.productionOrderId) : "", description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: (d) =>
       d.lines.map((l) => ({
         goodsItemId: String(l.goodsItemId),
@@ -235,6 +233,7 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
       date: header.date,
       warehouseId: Number(header.warehouseId),
       costCenterId: header.costCenterId ? Number(header.costCenterId) : null,
+      productionOrderId: header.productionOrderId ? Number(header.productionOrderId) : null,
       description: header.description,
       details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
@@ -324,6 +323,7 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
               <label>مرکز هزینه<RequiredMark /></label>
               <CostCenterPickerField costCenters={costCenters} value={header.costCenterId} onChange={(id) => setHeader({ ...header, costCenterId: id })} disabled={coreDisabled} />
             </div>
+            <ProductionOrderField value={header.productionOrderId} onChange={(id) => setHeader({ ...header, productionOrderId: id })} disabled={coreDisabled} />
             <DocDetailHeaderFields
               config={detailConfig}
               values={header.details}

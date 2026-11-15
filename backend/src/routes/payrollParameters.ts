@@ -8,6 +8,7 @@ import { assertParameterValueNotLocked, execMonthBeforeLastCalculation, lastCalc
 import { bulkChangeMembers, candidatesAt, membersAt } from "../services/payrollBasisService";
 import { PayrollCalcError } from "../services/payrollCalculationService";
 import { employeeValueCount, isPersonnelKind } from "../services/personnelValueService";
+import { trimOrNull } from "../utils/inputParse";
 
 // حقوق و دستمزد › تنظیمات › پارامترهای مبنا: تعریف پارامتر + مقدارهای تاریخ‌دار (مقدار ساده یا جدول پلکانی).
 // هر مقدار «ماه اجرا» دارد (سال+ماه شمسی؛ تاریخ شروعِ ذخیره‌شده = روز اول همان ماه). ماه اجرای مقدار جدید باید بعد از آخرین مقدار همان پارامتر
@@ -22,10 +23,6 @@ const TYPES = ["NUMBER", "AMOUNT", "BRACKETS"];
 /** نوع داده‌ی مجاز مقدار ثابت پرسنلی: جدول پلکانی برای هر نفر معنا ندارد */
 const PERSONNEL_TYPES = ["NUMBER", "AMOUNT"];
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
 const ymKey = (y: number, m: number) => y * 12 + (m - 1);
 const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 const monthLabel = (d: Date) => {
@@ -154,7 +151,7 @@ router.get("/payroll-parameters/:id", async (req, res) => {
 router.post("/payroll-parameters", can(`${FORM}.create`), async (req, res) => {
   const b = req.body as any;
   try {
-    const title = str(b.title);
+    const title = trimOrNull(b.title);
     if (!title) throw new PErr("عنوان الزامی است");
     // «نوع»: مقدار ثابت (با «نوع داده»)، مبنا (با «منبع داده»: حکم / محاسبات؛ بدون مقدار) یا مقدار ثابت پرسنلی (منابع انسانی / حقوقی؛ مقدار هر کارمند جداگانه)
     const kind: "CONSTANT" | "BASIS" | "PERSONNEL_HR" | "PERSONNEL_PAYROLL" = b.kind === "BASIS" ? "BASIS" : isPersonnelKind(b.kind) ? b.kind : "CONSTANT";
@@ -168,7 +165,7 @@ router.post("/payroll-parameters", can(`${FORM}.create`), async (req, res) => {
     let n = (last?.id ?? 0) + 1;
     let key = `PARAM_${n}`;
     while (await prisma.payrollParameter.findUnique({ where: { key } })) key = `PARAM_${++n}`;
-    const created = await prisma.payrollParameter.create({ data: { key, title, kind, type: kind === "BASIS" ? "AMOUNT" : b.type, basisSource: kind === "BASIS" ? b.basisSource : null, decreeValueMode: kind === "BASIS" && b.basisSource === "DECREE" ? b.decreeValueMode : null, description: str(b.description), isSystem: false } });
+    const created = await prisma.payrollParameter.create({ data: { key, title, kind, type: kind === "BASIS" ? "AMOUNT" : b.type, basisSource: kind === "BASIS" ? b.basisSource : null, decreeValueMode: kind === "BASIS" && b.basisSource === "DECREE" ? b.decreeValueMode : null, description: trimOrNull(b.description), isSystem: false } });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت پارامتر");
@@ -181,12 +178,12 @@ router.put("/payroll-parameters/:id", can(`${FORM}.edit`), async (req, res) => {
   try {
     const p = await prisma.payrollParameter.findUnique({ where: { id } });
     if (!p) return res.status(404).json({ error: "پارامتر یافت نشد" });
-    const title = b.title === undefined ? undefined : str(b.title);
+    const title = b.title === undefined ? undefined : trimOrNull(b.title);
     if (title === null) throw new PErr("عنوان الزامی است");
     // کلید و نوع هرگز تغییر نمی‌کنند (فرمول‌ها و مقدارهای ثبت‌شده به آن‌ها وابسته‌اند)
     await prisma.payrollParameter.update({
       where: { id },
-      data: { title, description: b.description === undefined ? undefined : str(b.description), isActive: p.isSystem ? undefined : b.isActive },
+      data: { title, description: b.description === undefined ? undefined : trimOrNull(b.description), isActive: p.isSystem ? undefined : b.isActive },
     });
     res.json({ ok: true });
   } catch (e) {
@@ -243,7 +240,7 @@ router.post("/payroll-parameters/:id/values", can(`${FORM}.edit`), async (req, r
     const lastCalc = await execMonthBeforeLastCalculation(exec.year, exec.month);
     if (lastCalc) throw new PErr(lastCalc);
     const created = await prisma.payrollParameterValue.create({
-      data: { parameterId: id, effectiveDate, execCalendarMonthId: calRow.id, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
+      data: { parameterId: id, effectiveDate, execCalendarMonthId: calRow.id, value: built.value, note: trimOrNull(b.note), brackets: { create: built.brackets } },
     });
     res.status(201).json({ id: created.id });
   } catch (e) {
@@ -287,7 +284,7 @@ router.put("/payroll-parameters/values/:valueId", can(`${FORM}.edit`), async (re
       prisma.payrollParameterBracket.deleteMany({ where: { valueId } }),
       prisma.payrollParameterValue.update({
         where: { id: valueId },
-        data: { effectiveDate, execCalendarMonthId: calRowForEdit?.id ?? null, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
+        data: { effectiveDate, execCalendarMonthId: calRowForEdit?.id ?? null, value: built.value, note: trimOrNull(b.note), brackets: { create: built.brackets } },
       }),
     ]);
     res.json({ ok: true });

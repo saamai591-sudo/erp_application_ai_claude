@@ -12,7 +12,7 @@ import { withoutFiscalPeriodScope } from "../lib/requestContext";
 // می‌شود)، و برعکس قیمت‌گذاری‌ای که بعد از برگشت شروع شود، نبودنِ بستن را می‌بیند و رد می‌شود.
 // =========================================================================
 
-export const INVENTORY_ACCOUNTING_CLOSE_LOCK_KEY = 7100004;
+const INVENTORY_ACCOUNTING_CLOSE_LOCK_KEY = 7100004;
 
 export async function lockOpeningYearShared(tx: Db, fiscalPeriodId: number): Promise<void> {
   await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock_shared(${INVENTORY_ACCOUNTING_CLOSE_LOCK_KEY}, ${Number(fiscalPeriodId)})`);
@@ -41,7 +41,7 @@ export async function getPreviousYearAccountingCloseProblem(fiscalPeriodId: numb
   return `بستن حسابداری موجودی دوره مالی قبل («${prev.title}») انجام نشده است؛ ابتدا آن را از «عملیات پایان دوره › بستن حسابداری موجودی» انجام دهید`;
 }
 
-export async function findNextFiscalPeriod(fiscalPeriodId: number, db: Db = prisma) {
+async function findNextFiscalPeriod(fiscalPeriodId: number, db: Db = prisma) {
   const fp = await db.fiscalPeriod.findUnique({ where: { id: fiscalPeriodId } });
   if (!fp) return null;
   return db.fiscalPeriod.findFirst({ where: { fromDate: { gt: fp.toDate } }, orderBy: { fromDate: "asc" } });

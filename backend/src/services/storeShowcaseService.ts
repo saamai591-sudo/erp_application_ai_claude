@@ -61,7 +61,7 @@ const INCLUDE = {
   stations: { include: { station: { select: { id: true, code: true, title: true } } }, orderBy: { stationId: "asc" } },
 } as const;
 
-export function showcaseShape(s: any) {
+function showcaseShape(s: any) {
   return {
     id: s.id,
     code: s.code,

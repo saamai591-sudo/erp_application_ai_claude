@@ -1,11 +1,10 @@
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
 import { prisma } from "../lib/prisma";
 import { evaluateLicense } from "../license/licenseService";
 import { tehranDate } from "../jobs/time";
 import { compareVersions, ReleaseManifest, ReleaseManifestError, verifyManifest } from "./releaseManifest";
 import { getLabels, listTags, RegistryCreds, RegistryError } from "./registryClient";
+import { getAppVersion } from "../lib/appVersion";
 
 // «به‌روزرسانی از داخل برنامه» — فقط از صفحه‌ی مدیریت (/management) و فقط با نشست مدیریت.
 // بک‌اند فقط فهرست نسخه‌ها را از ریجستری می‌خواند (HTTP، بدون docker) و امضای هر manifest را می‌سنجد؛ اجرای واقعیِ به‌روزرسانی با سرویس جدای
@@ -40,13 +39,7 @@ function decrypt(stored: string): string {
   return Buffer.concat([d.update(Buffer.from(data, "base64")), d.final()]).toString("utf8");
 }
 
-export function currentVersion(): string {
-  try {
-    return JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "..", "package.json"), "utf8")).version || "";
-  } catch {
-    return "";
-  }
-}
+const currentVersion = (): string => getAppVersion();
 
 export async function getSettings() {
   const s = await prisma.updateSettings.findUnique({ where: { id: 1 } });

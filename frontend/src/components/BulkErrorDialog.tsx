@@ -1,16 +1,7 @@
 import { Modal } from "./Modal";
 import { ExportColumn, exportGridToCsv } from "../lib/gridExport";
 import { ApiError } from "../lib/api";
-
-function ExcelExportIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M8.5 13.5 12 18M12 13.5l-3.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
+import { ExcelExportIcon } from "./icons";
 
 /**
  * فرمت استاندارد نمایش خطا در کل سیستم، سطح Base: اگر خطا جزئیاتِ ساختاریافته (details) نداشته باشد،

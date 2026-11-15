@@ -14,9 +14,10 @@ import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
-import { partyDisplayName } from "./Users";
+
 import { PartyQuickDialog, QuickParty, EMPTY_QUICK_PARTY } from "../components/PartyQuickDialog";
 import { childrenFromDetail, childrenPayload } from "../components/PartySections";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 // «مشتری» — طبق تصمیم صریح کاربر، طرف‌حساب ساده، دقیقاً مثل «تامین‌کننده» ولی عمداً بدون
 // گروه/کارشناس فروش (بدون تنظیمات اضافه). رجوع کنید به Suppliers.tsx برای الگوی مرجع.
@@ -101,7 +102,6 @@ function CustomerList() {
   const cacheKey = "/customers";
   const [items, setItems] = usePersistedState<CustomerRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/customers").then(setItems).catch((e) => setError(e.message));

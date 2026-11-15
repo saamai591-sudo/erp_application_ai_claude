@@ -7,7 +7,7 @@ import { toFaDigits } from "../lib/formatAmount";
 // (آرایه‌ی هر بخش = مجموعه‌ی کامل آن بخش؛ ردیف دارای id ویرایش، بدون id جدید، حذف‌شده از آرایه پاک می‌شود).
 // «هر بخش یک اصلی»: در هر بخش فقط یک ردیف «اصلی» است؛ اگر هیچ‌کدام علامت نخورده باشد سرور ردیف اول را اصلی می‌کند.
 
-export const ADDRESS_TYPE_FA: Record<string, string> = { HEAD_OFFICE: "دفتر مرکزی", FACTORY: "کارخانه", WAREHOUSE: "انبار", HOME: "منزل" };
+const ADDRESS_TYPE_FA: Record<string, string> = { HEAD_OFFICE: "دفتر مرکزی", FACTORY: "کارخانه", WAREHOUSE: "انبار", HOME: "منزل" };
 export const PHONE_TYPE_FA: Record<string, string> = { MOBILE: "موبایل", HEAD_OFFICE: "دفتر مرکزی", FACTORY: "کارخانه", WAREHOUSE: "انبار", HOME: "منزل" };
 
 export interface AddressRow {

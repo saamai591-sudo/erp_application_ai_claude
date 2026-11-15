@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
-import { AssetError } from "./assetError";
+import { AssetError, assetBulkFail } from "./assetError";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
@@ -22,12 +22,6 @@ const D = (v: any) => new Prisma.Decimal(v ?? 0);
 const fail = (m: string): never => {
   throw new AssetError(m);
 };
-function bulkFail(summary: string, details: Record<string, unknown>[]): never {
-  const err = new AssetError(summary);
-  err.details = details;
-  throw err;
-}
-
 /** آخرین گروه پلاک در یک تاریخ (تغییر گروه‌های تاییدشده؛ روزِ تغییر اولین روز در گروه جدید است) */
 export async function groupOnDate(asset: { id: number; assetGroupId: number }, date: Date, db: any = prisma): Promise<number> {
   const items = await withoutFiscalPeriodScope(() =>
@@ -100,7 +94,7 @@ export async function saveChange(id: number | null, body: Body) {
     if (ex!.status !== "DRAFT") fail("تغییر گروه تاییدشده قابل ویرایش نیست؛ ابتدا تایید آن را برگردانید");
   }
   const { problems, fromGroups } = await checkItems(date, toGroup!.id, assetIds, id);
-  if (problems.length) bulkFail("ذخیره‌ی تغییر گروه انجام نشد", problems);
+  if (problems.length) assetBulkFail("ذخیره‌ی تغییر گروه انجام نشد", problems);
   const fp = await getCurrentFiscalPeriod();
   if (!fp) return fail("دوره مالی تعریف نشده است");
   return prisma.$transaction(async (tx) => {
@@ -145,7 +139,7 @@ export async function confirmChange(id: number, userId: number | null) {
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   const dec = baseCurrency?.decimalPlaces ?? 0;
   const { problems, fromGroups } = await checkItems(ch.date, ch.toGroupId, ch.items.map((i) => i.assetId), id);
-  if (problems.length) bulkFail("تایید تغییر گروه انجام نشد", problems);
+  if (problems.length) assetBulkFail("تایید تغییر گروه انجام نشد", problems);
   const fp = await getCurrentFiscalPeriod();
   const calcEnd = await lastCalculatedEnd();
 
@@ -180,7 +174,7 @@ export async function unconfirmChange(id: number) {
     const later = await withoutFiscalPeriodScope(() => prisma.assetGroupChangeItem.findFirst({ where: { assetId: it.assetId, change: { status: "CONFIRMED", date: { gt: ch.date } } }, select: { change: { select: { number: true } } } }));
     if (later) problems.push({ "پلاک": it.asset.detailCode, "علت": `تغییر گروه تاییدشده‌ی بعدی (شماره ${later.change.number}) دارد` });
   }
-  if (problems.length) bulkFail("برگشت از تایید انجام نشد", problems);
+  if (problems.length) assetBulkFail("برگشت از تایید انجام نشد", problems);
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${LOCK_KEY}, 0)`);
     for (const it of ch.items) {
@@ -237,7 +231,7 @@ export async function issueChangeEntry(id: number) {
 
   // خالص هر (معین + تفصیل‌ها): مثبت = بدهکار، منفی = بستانکار
   const net = new Map<string, { accountId: number; d: [string | null, string | null, string | null]; amount: Prisma.Decimal }>();
-  const post = (a: any, ctx: { plaque: string; costCenter: string | null; project: string | null; party?: string | null }, label: string, signed: Prisma.Decimal, plaqueTitle: string) => {
+  const post = (a: any, ctx: { costCenter: string | null; project: string | null; party?: string | null }, label: string, signed: Prisma.Decimal, plaqueTitle: string) => {
     if (!a || signed.isZero()) return;
     const r = fillAssetDetails(a.account, ctx, label);
     if (r.error) {
@@ -253,7 +247,7 @@ export async function issueChangeEntry(id: number) {
   for (const it of ch.items) {
     const a = it.asset;
     const pos = [...a.positions].reverse().find((p) => day(p.fromDate) <= day(ch.date)) ?? a.positions[0];
-    const ctx = { plaque: a.detailCode, costCenter: pos?.costCenter.detailCode ?? null, project: pos?.project?.detailCode ?? null };
+    const ctx = { costCenter: pos?.costCenter.detailCode ?? null, project: pos?.project?.detailCode ?? null };
     const cost = D(it.costAtChange);
     const acc = D(it.accumulatedAtChange);
     const fromCost = await acct(it.fromGroupId, "ASSET_COST");
@@ -266,18 +260,18 @@ export async function issueChangeEntry(id: number) {
     post(toAcc, ctx, "انتقال استهلاک انباشته (گروه مقصد)", acc.neg(), a.detailCode);
     // هزینه‌ی استهلاک «تا قبل از تغییر»: بدهکار هزینه / بستانکار استهلاک انباشته‌ی گروه مبدا (به‌ازای موقعیتِ هر رکورد)
     for (const s of it.depreciationItems) {
-      const sctx = { plaque: a.detailCode, costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null };
+      const sctx = { costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null };
       post(await acct(it.fromGroupId, "DEPRECIATION_EXPENSE"), sctx, "هزینه استهلاک تا قبل از تغییر", D(s.amount), a.detailCode);
       post(fromAcc, sctx, "استهلاک انباشته تا قبل از تغییر", D(s.amount).neg(), a.detailCode);
     }
     // هزینه‌ی بیمه «تا قبل از تغییر»: بدهکار هزینه بیمه / بستانکار پیش‌پرداخت بیمه‌ی گروه مبدا
     for (const s of it.insuranceItems) {
-      const sctx = { plaque: a.detailCode, costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null, party: insurerCodeOf(s) };
+      const sctx = { costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null, party: insurerCodeOf(s) };
       post(await acct(it.fromGroupId, "INSURANCE_EXPENSE", insuranceTypeOf(s)), sctx, "هزینه بیمه تا قبل از تغییر", D(s.amount), a.detailCode);
       post(await acct(it.fromGroupId, "PREPAID_INSURANCE", insuranceTypeOf(s)), sctx, "پیش‌پرداخت بیمه تا قبل از تغییر", D(s.amount).neg(), a.detailCode);
     }
   }
-  if (problems.length) bulkFail("صدور سند تغییر گروه انجام نشد", problems);
+  if (problems.length) assetBulkFail("صدور سند تغییر گروه انجام نشد", problems);
 
   const description = `بابت تغییر گروه دارایی ثابت شماره ${ch.number} (${formatJalaliDateForMessage(ch.date)})`;
   const lines: IssueLineInput[] = [];

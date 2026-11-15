@@ -22,7 +22,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 // حقوق و دستمزد › وام › پرداخت وام: وام یک کارمند (فعال در تاریخ پرداخت) با مبلغ، تعداد و مبلغ قسط، ماه شروع قسط و نحوه‌ی کسر باقیمانده‌ی تقسیم.
 // اقساط هر ماه همزمان با «محاسبه حقوق» بر اساس «مانده» کسر می‌شود؛ اگر از ماه شروع قسط (یا بعدتر) حقوق محاسبه شده باشد، ذخیره‌ی وام ممکن نیست.
 
-export const REMAINDER_MODE_FA: Record<string, string> = {
+const REMAINDER_MODE_FA: Record<string, string> = {
   WITH_FIRST: "همراه با قسط اول",
   WITH_LAST: "همراه با قسط آخر",
   EXTRA_LAST: "در قسط آخر",

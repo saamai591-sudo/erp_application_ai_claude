@@ -2,6 +2,8 @@ import { prisma, Db } from "../lib/prisma";
 import { getLineAmounts, setLineAmount } from "./documentItemAmountService";
 import { CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
 import { getPreviousYearAccountingCloseProblem, lockOpeningYearShared, assertFiscalYearNotAccountingClosed } from "./inventoryAccountingGuards";
+import { DOC_TYPE_FA } from "../data/warehouseDocTypes";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
 
 // ارزش‌گذاری در سطح «کالا» است (تصمیم صریح کاربر، جایگزین کاردکس سطح کالا+انبار قبلی): وضعیت/قفل ارزش‌گذاری (GoodsPricingStatus) در سطح
 // کالا+دوره‌ی گزارشگری است و کلید محاسبه هم فقط «کالا» است — میانگین موزون متحرک روی مجموع همه‌ی انبارهای کالا حساب می‌شود و انبار هیچ
@@ -87,29 +89,8 @@ export const PRICING_DOC_TYPES = [
   "WAREHOUSE_TRANSFER_IN",
 ];
 
-// عنوان فارسی هر نوع سند انبار — هم در گزارش «اصلاحیه‌های قیمت‌گذاری» (goodsPricing.ts) و هم در پیام‌های
-// لایه‌ی اعتبارسنجی (goodsPricingValidation.ts) استفاده می‌شود؛ یک‌جا نگه داشته می‌شود تا دو کپی از هم
-// جدا نشوند.
-export const DOC_TYPE_FA: Record<string, string> = {
-  INITIAL_INVENTORY: "موجودی اول دوره",
-  WAREHOUSE_RECEIPT: "رسید انبار خرید",
-  WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
-  SALES_DELIVERY: "حواله فروش",
-  SALES_RETURN: "برگشت از فروش",
-  STORE_SALE_ISSUE: "حواله فروش فروشگاهی",
-  STORE_SALE_RETURN: "برگشت حواله فروش فروشگاهی",
-  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
-  PRODUCTION_RECEIPT: "رسید تولید",
-  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
-  PROJECT_CONSUMPTION: "مصرف پروژه",
-  PRODUCTION_CONSUMPTION: "مصرف تولید",
-  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
-  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
-  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
-  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
-  INVENTORY_COUNTING_SHORTAGE: "کسری انبارگردانی",
-  WAREHOUSE_TRANSFER_IN: "رسید انتقال",
-};
+// عنوان فارسی انواع سند انبار: data/warehouseDocTypes.ts (منبع حقیقت)؛ برای سازگاری با import های قبلی از همین‌جا هم export می‌شود.
+export { DOC_TYPE_FA };
 
 const MAX_ITERATIONS = 25;
 
@@ -117,11 +98,6 @@ async function getBaseCurrencyDecimalPlaces(db: Db = prisma): Promise<number> {
   const baseCurrency = await db.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است؛ ابتدا یک ارز را به‌عنوان ارز پایه مشخص کنید");
   return baseCurrency.decimalPlaces;
-}
-
-function round(value: number, decimalPlaces: number): number {
-  const factor = Math.pow(10, decimalPlaces);
-  return Math.round(value * factor) / factor;
 }
 
 type Line = {
@@ -199,7 +175,7 @@ function walkKardex(
       const external = !outLine && line.sourceWarehouseTransferOutLineId ? externalTransferOut.get(line.sourceWarehouseTransferOutLineId) : undefined;
       const outQty = outLine ? Number(outLine.quantity) : external ? external.qty : 0;
       const outAmount = outLine ? computed.get(outLine.id) || 0 : external ? external.amount : 0;
-      const amt = outQty > 0 ? round((outAmount * qty) / outQty, decimalPlaces) : 0;
+      const amt = outQty > 0 ? roundToCurrencyDecimals((outAmount * qty) / outQty, decimalPlaces) : 0;
       computed.set(line.id, amt);
       s.qty += qty;
       s.value += amt;
@@ -208,7 +184,7 @@ function walkKardex(
 
     if (IN_COMPUTED_TYPES.has(type)) {
       const avgCost = s.qty > 0 ? s.value / s.qty : 0;
-      const amt = round(qty * avgCost, decimalPlaces);
+      const amt = roundToCurrencyDecimals(qty * avgCost, decimalPlaces);
       computed.set(line.id, amt);
       s.qty += qty;
       s.value += amt;
@@ -218,7 +194,7 @@ function walkKardex(
     // OUT_COMPUTED_TYPES + SUPPLIER_RETURN
     const fixed = fixedReturnAmount.get(line.id);
     const avgCost = s.qty > 0 ? s.value / s.qty : 0;
-    const amt = fixed !== undefined ? fixed : round(qty * avgCost, decimalPlaces);
+    const amt = fixed !== undefined ? fixed : roundToCurrencyDecimals(qty * avgCost, decimalPlaces);
     computed.set(line.id, amt);
     s.qty -= qty;
     s.value -= amt;
@@ -339,7 +315,7 @@ export async function computeItemKardex(goodsItemId: number, win: PricingWindow,
       returningLinesByReceipt.set(receipt.id, arr);
     } else {
       const src = receipt ? { qty: Number(receipt.quantity), amount: Number(receipt.amount) } : external.get(l.sourceWarehouseReceiptLineId);
-      if (src && src.qty > 0) fixedReturnAmount.set(l.id, round((src.amount * Number(l.quantity)) / src.qty, decimalPlaces));
+      if (src && src.qty > 0) fixedReturnAmount.set(l.id, roundToCurrencyDecimals((src.amount * Number(l.quantity)) / src.qty, decimalPlaces));
     }
   }
   const fixedRemainingAmount = new Map<number, number>();
@@ -350,11 +326,11 @@ export async function computeItemKardex(goodsItemId: number, win: PricingWindow,
     const originalQty = Number(receipt.quantity);
     let sumShares = 0;
     for (const r of returningLines) {
-      const share = originalQty > 0 ? round((originalAmount * Number(r.quantity)) / originalQty, decimalPlaces) : 0;
+      const share = originalQty > 0 ? roundToCurrencyDecimals((originalAmount * Number(r.quantity)) / originalQty, decimalPlaces) : 0;
       initialReturnShare.set(r.id, share);
       sumShares += share;
     }
-    fixedRemainingAmount.set(receiptId, round(originalAmount - sumShares, decimalPlaces));
+    fixedRemainingAmount.set(receiptId, roundToCurrencyDecimals(originalAmount - sumShares, decimalPlaces));
   }
 
   const externalTransferOut = external;
@@ -492,7 +468,7 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
         if (newTotal === undefined) continue;
 
         // line.amount همین حالا SUM(Difference)ی کامل تاریخچه‌ی ردیف است
-        const delta = round(newTotal - Number(line.amount), decimalPlaces);
+        const delta = roundToCurrencyDecimals(newTotal - Number(line.amount), decimalPlaces);
         if (Math.abs(delta) > epsilon) {
           changes.push({ lineId: line.id, delta, newTotal, quantity: Number(line.quantity) });
         }

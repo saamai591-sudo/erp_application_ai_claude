@@ -25,6 +25,7 @@ import {
   templateLockMessage,
 } from "../services/payrollAccountingService";
 import { DETAIL_TYPE_CODE_PARTY } from "../utils/detailValues";
+import { collapseOrNull } from "../utils/inputParse";
 
 // حقوق و دستمزد › حسابداری حقوق: گروه حساب حقوق، الگوی سند حقوق، تنظیمات صدور سند، و اکشن‌های «صدور/حذف سند» در محاسبه‌ی حقوق.
 // قواعد: services/payrollAccountingService.ts.
@@ -42,7 +43,6 @@ function fail(res: any, e: any, fallback: string) {
   if (e?.code === "P2002") return res.status(400).json({ error: "رکورد تکراری است" });
   return res.status(400).json({ error: e?.message || fallback });
 }
-const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ") : null);
 const personName = (p: { firstName: string | null; lastName: string | null; name: string | null }) => [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "";
 
 // ── گروه حساب حقوق ──
@@ -60,7 +60,7 @@ router.get("/payroll-account-groups/:id", can(`${F_GROUP}.view`), async (req, re
 
 router.post("/payroll-account-groups", can(`${F_GROUP}.create`), async (req, res) => {
   try {
-    const title = str(req.body.title);
+    const title = collapseOrNull(req.body.title);
     if (!title) throw new PayrollAcctError("عنوان الزامی است");
     if (await prisma.payrollAccountGroup.findUnique({ where: { title } })) throw new PayrollAcctError("گروه دیگری با همین عنوان وجود دارد");
     let code: number | null = null;
@@ -90,7 +90,7 @@ router.put("/payroll-account-groups/:id", can(`${F_GROUP}.edit`), async (req, re
     const id = Number(req.params.id);
     const g = await prisma.payrollAccountGroup.findUnique({ where: { id } });
     if (!g) return res.status(404).json({ error: "گروه حساب حقوق یافت نشد" });
-    const title = str(req.body.title);
+    const title = collapseOrNull(req.body.title);
     if (!title) throw new PayrollAcctError("عنوان الزامی است");
     if (await prisma.payrollAccountGroup.findFirst({ where: { title, NOT: { id } } })) throw new PayrollAcctError("گروه دیگری با همین عنوان وجود دارد");
     const usesProject = !!req.body.usesProject;

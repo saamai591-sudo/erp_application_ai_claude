@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { priceItem, revertItem, pricingDocumentWhere, DOC_TYPE_FA } from "../services/goodsPricingService";
+import { priceItem, revertItem, pricingDocumentWhere } from "../services/goodsPricingService";
 import { validatePriceOperation } from "../services/goodsPricingValidation";
 import { parseFilters, matchesFilterValue } from "../utils/tableFilters";
 import { can, userHasAction } from "../authz/guard";

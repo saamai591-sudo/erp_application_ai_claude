@@ -47,7 +47,7 @@ export interface GoodsGroup {
   attributes: GroupAttributeLink[];
 }
 
-export const GROUP_TYPE_FA: Record<string, string> = { PRODUCT: "کالا", SERVICE: "خدمت" };
+const GROUP_TYPE_FA: Record<string, string> = { PRODUCT: "کالا", SERVICE: "خدمت" };
 
 export default function GoodsGroups() {
   const location = useLocation();
@@ -129,11 +129,11 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
   const location = useLocation();
   const cacheKey = `form:${location.pathname}${location.search}`;
   const [levels, setLevels] = useState<GoodsGroupLevel[]>([]);
-  const [allAttributes, setAllAttributes] = useState<GoodsAttribute[]>([]);
+  const [, setAllAttributes] = useState<GoodsAttribute[]>([]);
   const [currentLevel, setCurrentLevel] = usePersistedState<GoodsGroupLevel | null>(`${cacheKey}:currentLevel`, null);
   const [effectiveParentId, setEffectiveParentId] = usePersistedState<number | null>(`${cacheKey}:effectiveParentId`, null);
   const [parentGroup, setParentGroup] = usePersistedState<GoodsGroup | null>(`${cacheKey}:parentGroup`, null);
-  const [hasTransactions, setHasTransactions] = useState(false);
+  const [, setHasTransactions] = useState(false);
   const [tab, setTab] = useState<"main" | "attributes">("main");
   const [form, setForm] = usePersistedState(`${cacheKey}:form`, {
     code: "",
@@ -164,8 +164,6 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
         setLoaded(true);
         return;
       }
-
-      const maxOrder = lvls.length ? Math.max(...lvls.map((l) => l.order)) : 0;
 
       function buildAttrRows(existing: GroupAttributeLink[]) {
         const existingSorted = [...existing].sort((a, b) => a.order - b.order);

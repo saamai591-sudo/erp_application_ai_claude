@@ -25,6 +25,8 @@ import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { DescriptionField } from "../components/DescriptionField";
+import { PlusIcon, UndoIcon, EyeIcon } from "../components/icons";
+import { partyTitleOf } from "../lib/partyDisplay";
 
 // «فاکتور برگشت از فروش» — طبق تصمیم صریح کاربر، دقیقاً هم‌ساختار/هم‌رفتار فاکتور فروش
 // (SalesInvoices.tsx)، با جایگزینی «حواله فروش» با «برگشت از فروش» (سند انبار SALES_RETURN — نگاه
@@ -38,11 +40,6 @@ interface CustomerOption { id: number; code: number; party: { category: "INDIVID
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 interface PickableLine { id: number; sourceInventoryLineId: number; salesReturnId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
-
-function customerTitle(c: CustomerOption): string {
-  if (c.party.detailTitle) return c.party.detailTitle;
-  return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
-}
 
 interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: "DRAFT"; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
@@ -61,31 +58,10 @@ export default function SalesReturnInvoices() {
   return <SalesReturnInvoiceList />;
 }
 
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function EyeIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
 function SalesReturnInvoiceList() {
   const cacheKey = "/sales-return-invoices";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     try {
@@ -501,12 +477,12 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
               disabled={headerDisabled}
               displayValue={(() => {
                 const c = customers.find((x) => String(x.id) === header.customerId);
-                return c ? `${toFaDigits(String(c.code))} — ${customerTitle(c)}` : "";
+                return c ? `${toFaDigits(String(c.code))} — ${partyTitleOf(c)}` : "";
               })()}
               rows={customers}
               columns={[
                 { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                { header: "عنوان", render: (x) => customerTitle(x), filterValue: (x) => customerTitle(x) },
+                { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
               ]}
               onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
             />

@@ -4,7 +4,7 @@ import crypto from "crypto";
 // کلید عمومی امضا اینجا ثابت است (کلید خصوصی فقط دست مدیر انتشار است و هرگز داخل مخزن/ایمیج نمی‌رود). env RELEASE_PUBLIC_KEY_B64 فقط برای آزمایش.
 // updater (updater/server.mjs) همین بررسی را مستقل انجام می‌دهد؛ منطق عمداً کوچک است و دو جا نوشته شده تا updater به کد بک‌اند وابسته نباشد.
 
-export const RELEASE_PUBLIC_KEY_B64 = process.env.RELEASE_PUBLIC_KEY_B64 || "MCowBQYDK2VwAyEAIHAFGzejPKZvtPgvdLcvlaRVs7Kxl1CxD/1xOp5KPkk=";
+const RELEASE_PUBLIC_KEY_B64 = process.env.RELEASE_PUBLIC_KEY_B64 || "MCowBQYDK2VwAyEAIHAFGzejPKZvtPgvdLcvlaRVs7Kxl1CxD/1xOp5KPkk=";
 
 export interface ReleaseImage {
   repo: string;

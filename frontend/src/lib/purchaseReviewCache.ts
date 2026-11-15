@@ -30,7 +30,7 @@ export function setPurchaseReviewSnapshot(snapshot: PurchaseReviewSnapshot) {
   store.set(snapshot);
 }
 
-export function clearPurchaseReviewSnapshot() {
+function clearPurchaseReviewSnapshot() {
   store.clearAll();
 }
 

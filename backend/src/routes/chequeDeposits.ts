@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { filterChequesByBaseDate, assertChequeBaseDatesNotAfter } from "../services/chequeBaseDates";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
@@ -33,14 +32,6 @@ interface HeaderBody {
   bankAccountId: number;
   description?: string;
   chequeItemIds: number[];
-}
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
 }
 
 async function validateChequeIds(chequeItemIds: number[], formDate: Date, excludeDocId?: number) {
@@ -155,7 +146,7 @@ router.post("/cheque-deposits", can(`${FORM}.create`), async (req, res) => {
 
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const bankAccount = await prisma.bankAccount.findUnique({ where: { id: body.bankAccountId } });
     if (!bankAccount) throw new Error("حساب بانکی یافت نشد");
 
@@ -198,7 +189,7 @@ router.put("/cheque-deposits/:id", can(`${FORM}.edit`), async (req, res) => {
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const bankAccount = await prisma.bankAccount.findUnique({ where: { id: body.bankAccountId } });
     if (!bankAccount) throw new Error("حساب بانکی یافت نشد");
 
@@ -242,7 +233,7 @@ router.post("/cheque-deposits/:id/approve", can(`${FORM}.approve`), async (req, 
   if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک چک داشته باشد" });
 
   try {
-    await resolveFiscalPeriod(d.date);
+    await resolveDocumentFiscalPeriod(d.date);
 
     for (const l of d.lines) {
       if (l.chequeItem.direction !== "RECEIVABLE" || l.chequeItem.status !== "IN_HAND") {
@@ -327,7 +318,6 @@ registerChequeDocReEdit(router, {
   minOneMessage: "سند واگذاری به بانک باید حداقل یک چک داشته باشد",
   hasOutcome: false,
   revertStatus: "IN_HAND",
-  resolveFiscalPeriod,
 });
 
 export default router;

@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { AssetError } from "./assetError";
+import { AssetError, assetBulkFail } from "./assetError";
 import type { ControlAccount } from "./assetControlAccountService";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { findIssuingDocType } from "./documentTypeService";
@@ -8,6 +8,7 @@ import { recordSettingUsage } from "./settingUsageService";
 import { resolveAssetCreditAccount } from "./assetControlAccountService";
 import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
 
 // «سند حسابداری تحصیل دارایی» — چند پلاکِ تاییدشده با هم در یک سند (از فهرست «تعریف دارایی» یا از فرم یک پلاک):
 //  • بدهکار: معین «دارایی ثابت» گروه حسابداری دارایی هر پلاک، با تفصیل‌های پلاک/مرکز هزینه/پروژه؛ ردیف‌ها بر اساس معین+تفصیل‌ها تجمیع می‌شوند.
@@ -16,12 +17,6 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 // پلاک تعریف‌دستی (افتتاحیه) سند تحصیل ندارد. همه‌یا‌هیچ؛ خطاها به‌ازای هر پلاک برمی‌گردد.
 
 const LOCK_KEY = 7100062;
-
-function bulkFail(summary: string, details: Record<string, unknown>[]): never {
-  const err = new AssetError(summary);
-  err.details = details;
-  throw err;
-}
 
 export async function issueAssetAcquisitionEntry(idsIn: number[], dateStr: string, userId: number | null) {
   const ids = Array.from(new Set(idsIn.map(Number).filter(Number.isFinite)));
@@ -79,8 +74,7 @@ export async function issueAssetAcquisitionEntry(idsIn: number[], dateStr: strin
     let ok = true;
     [acc.detailType1, acc.detailType2, acc.detailType3].forEach((dt, i) => {
       if (!dt) return;
-      if (dt.code === 9) d[i] = a.detailCode;
-      else if (dt.code === 2) d[i] = pos?.costCenter.detailCode ?? null;
+      if (dt.code === 2) d[i] = pos?.costCenter.detailCode ?? null;
       else if (dt.code === 8) {
         d[i] = pos?.project?.detailCode ?? null;
         if (!d[i]) { bad(`حساب «${acc.title}» تفصیل پروژه دارد ولی موقعیت دارایی پروژه ندارد`); ok = false; }
@@ -107,12 +101,12 @@ export async function issueAssetAcquisitionEntry(idsIn: number[], dateStr: strin
       usedGoodsSettingIds.add(p.c.settingId);
     }
   }
-  if (problems.length) bulkFail("صدور سند تحصیل انجام نشد", problems);
+  if (problems.length) assetBulkFail("صدور سند تحصیل انجام نشد", problems);
 
   const description = `بابت تحصیل ${toFa(assets.length)} دارایی ثابت`;
   const lines: IssueLineInput[] = [
-    ...Array.from(debit.values()).map((x) => ({ accountId: x.accountId, detail1Code: x.d1, detail2Code: x.d2, detail3Code: x.d3, currencyId: baseCurrency.id, debit: round(x.amount), credit: 0, fxRate: 1, description })),
-    ...Array.from(credit.values()).map((x) => ({ accountId: x.accountId, detail1Code: x.d1, detail2Code: x.d2, detail3Code: x.d3, currencyId: baseCurrency.id, debit: 0, credit: round(x.amount), fxRate: 1, description })),
+    ...Array.from(debit.values()).map((x) => ({ accountId: x.accountId, detail1Code: x.d1, detail2Code: x.d2, detail3Code: x.d3, currencyId: baseCurrency.id, debit: roundToCurrencyDecimals(x.amount, 2), credit: 0, fxRate: 1, description })),
+    ...Array.from(credit.values()).map((x) => ({ accountId: x.accountId, detail1Code: x.d1, detail2Code: x.d2, detail3Code: x.d3, currencyId: baseCurrency.id, debit: 0, credit: roundToCurrencyDecimals(x.amount, 2), fxRate: 1, description })),
   ];
   const docType = await findIssuingDocType("FIXED_ASSET");
   if (!docType) throw new AssetError("نوع سند در سیستم تعریف نشده است");
@@ -155,5 +149,4 @@ export async function revertAssetAcquisitionEntry(idsIn: number[]) {
   return { deletedEntries: entryIds.length, releasedAssets: affected };
 }
 
-const round = (n: number) => Math.round(n * 100) / 100;
 const toFa = (n: number) => String(n);

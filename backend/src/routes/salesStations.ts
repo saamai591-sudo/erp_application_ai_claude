@@ -37,7 +37,7 @@ function customerTitle(c: any): string {
   return p.detailTitle || (p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim());
 }
 
-export function stationShape(s: any) {
+function stationShape(s: any) {
   return {
     id: s.id,
     code: s.code,

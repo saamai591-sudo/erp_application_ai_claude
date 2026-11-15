@@ -20,8 +20,9 @@ import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { partyDisplayName } from "./Users";
+
 import { DescriptionField } from "../components/DescriptionField";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 // «پرداخت تنخواه» (مدیریت خزانه › پرداخت): سند ساده‌ی ثبتِ برداشت از یک تنخواه — بدون سند حسابداری/گردش تایید (طبق تصمیم صریح کاربر).
 // basisType از خودِ نوع پرداختِ انتخاب‌شده می‌آید (فیلد نمایشی، غیرقابل‌ویرایش)؛ وقتی basisType≠NONE، سند مبنا هم‌الگوی

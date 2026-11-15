@@ -22,7 +22,7 @@ export function setAssetGroupReviewSnapshot(snapshot: AssetGroupReviewSnapshot) 
   store.set(snapshot);
 }
 
-export function clearAssetGroupReviewSnapshot() {
+function clearAssetGroupReviewSnapshot() {
   store.clearAll();
 }
 

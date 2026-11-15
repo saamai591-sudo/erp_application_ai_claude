@@ -22,6 +22,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
 
 // «برگشت به تامین‌کننده» — طبق stockAnalysis.md بند ۳۸؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/supplierReturns.ts. طرف مقابل (تامین‌کننده) در سطح سند الزامی است و باید با
@@ -60,10 +61,6 @@ export default function SupplierReturns() {
   if (isNew) return <SupplierReturnForm basePath={basePath} />;
   if (isEdit) return <SupplierReturnForm basePath={basePath} editId={Number(id)} />;
   return <SupplierReturnList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function SupplierReturnList({ basePath }: { basePath: string }) {
@@ -139,7 +136,7 @@ function SupplierReturnForm({ editId, basePath }: { editId?: number; basePath: s
   const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
 
   const detailConfig = useDocDetailConfig("SUPPLIER_RETURN");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; partyDetailCode: string; description: string; details: DetailValues },
     RowState,
     Detail

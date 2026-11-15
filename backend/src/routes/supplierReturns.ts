@@ -16,6 +16,7 @@ import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountS
 const FORM = findFormPrefix("supplier-returns");
 import { fetchPickableWarehouseReceiptLines } from "../services/warehouseReceiptLineSelector";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { partyTitleOrNull } from "../utils/partyTitle";
 
 const VIEW_ACCOUNTING_PERMISSION = `${findFormPrefix("supplier-returns")}.viewAccounting`;
 
@@ -122,11 +123,6 @@ async function validateLines(warehouseId: number, partyDetailCode: string, lines
   return cleaned;
 }
 
-function partyTitle(p: any): string | null {
-  if (!p) return null;
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 router.get("/supplier-returns/pickable-lines", can(`${FORM}.view`), async (req, res) => {
   const warehouseId = req.query.warehouseId ? Number(req.query.warehouseId) : null;
   const partyDetailCode = (req.query.partyDetailCode as string) || null;
@@ -172,7 +168,7 @@ router.get("/supplier-returns", can(`${FORM}.view`), async (req: AuthedRequest, 
         warehouseTitle: d.warehouse.title,
         fiscalPeriodTitle: d.fiscalPeriod.title,
         partyId,
-        partyTitle: partyTitle(partyId ? partyById.get(partyId) : null),
+        partyTitle: partyTitleOrNull(partyId ? partyById.get(partyId) : null),
         description: d.description,
         status: d.status,
         lineCount: d.lines.length,
@@ -221,7 +217,7 @@ router.get("/supplier-returns/:id", can(`${FORM}.view`), async (req: AuthedReque
     fiscalPeriodTitle: d.fiscalPeriod.title,
     partyId,
     partyDetailCode: d.detailCode,
-    partyTitle: partyTitle(party),
+    partyTitle: partyTitleOrNull(party),
     description: d.description,
     status: d.status,
     finalizedAt: d.finalizedAt,

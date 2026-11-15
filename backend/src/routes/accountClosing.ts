@@ -3,7 +3,7 @@ import { auditRoute } from "../middleware/auditEvent";
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
-import { computeFullAccountCode } from "../utils/accountCode";
+import { computeFullAccountCode, rootNatureGroup } from "../utils/accountCode";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -11,17 +11,6 @@ import { findFormPrefix } from "../authz/registry";
 const FORM = findFormPrefix("account-closing");
 
 const router = Router();
-
-async function rootNatureGroup(accountId: number, byId: Map<number, any>): Promise<string | null> {
-  let cur = byId.get(accountId);
-  while (cur) {
-    if (!cur.parentId) return cur.natureGroup || null;
-    const parent = byId.get(cur.parentId);
-    if (!parent) return cur.natureGroup || null;
-    cur = parent;
-  }
-  return null;
-}
 
 // حسابهای سود و زیانیِ دارای مانده تا تاریخ مشخص‌شده، به تفکیک حساب و تفصیل‌ها
 router.get("/available-lines", can(`${FORM}.view`), async (req, res) => {

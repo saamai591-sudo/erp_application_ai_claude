@@ -52,7 +52,7 @@ const manualDriver: CardTerminalDriver = {
 };
 
 /** تراکنش برنامه‌ی صندوق: ۱۸۰ ثانیه انتظار کارت + دست‌دهی و استعلام ⇒ بعد از ۵ دقیقه بدون گزارش، نتیجه «نامشخص» است */
-export const CLIENT_RESULT_TIMEOUT_MS = 300_000;
+const CLIENT_RESULT_TIMEOUT_MS = 300_000;
 
 /** سداد (PcPos): دستگاه فقط در شبکه‌ی محل در دسترس است؛ درایور واقعی در برنامه‌ی صندوق اجرا می‌شود (pos-app/drivers/sadad.mjs) و نتیجه با POST /card-transactions/:id/client-result می‌آید. سرور هیچ‌چیز را خودش اجرا نمی‌کند. */
 const sadadDriver: CardTerminalDriver = {
@@ -74,7 +74,7 @@ const parsianDriver: CardTerminalDriver = {
   cancel: async () => ({ status: "CANCELLED" }),
 };
 
-export const DRIVERS: Record<string, CardTerminalDriver> = { MANUAL: manualDriver, SADAD: sadadDriver, PARSIAN: parsianDriver };
+const DRIVERS: Record<string, CardTerminalDriver> = { MANUAL: manualDriver, SADAD: sadadDriver, PARSIAN: parsianDriver };
 export const driverOptions = () => Object.entries(DRIVERS).map(([key, d]) => ({ key, title: d.title, automatic: d.automatic }));
 
 /** تراکنشی که برنامه‌ی صندوق اجرا می‌کند (نه خودِ سرور) */
@@ -85,7 +85,7 @@ const dayStr = (d: Date) => d.toISOString().slice(0, 10);
 
 const INCLUDE = { cardReader: { select: { title: true, terminalNumber: true, merchantNumber: true, deviceIp: true, devicePort: true } }, receipt: { select: { number: true } } } as const;
 
-export function txShape(t: any) {
+function txShape(t: any) {
   return {
     id: t.id,
     saleId: t.saleId,
@@ -170,7 +170,7 @@ export async function startTransaction(body: { saleId?: unknown; cardReaderId?: 
 }
 
 /** اعمال نتیجه‌ی درایور/کاربر روی تراکنش؛ موفقیت = ساخت دریافت در همان تراکنش دیتابیس */
-export async function applyResult(id: number, r: DriverResult) {
+async function applyResult(id: number, r: DriverResult) {
   const t = await loadTx(id);
   if (!["PENDING", "UNKNOWN"].includes(t.status)) return txShape(t);
   if (r.status === "PENDING") return txShape(t);
@@ -290,7 +290,7 @@ export async function resolveTransaction(id: number, body: { outcome?: unknown; 
  * مهلت‌ها (تنبل، هر بار که فهرست/استعلام انجام شود): تراکنش برنامه‌ی صندوق که تا ۵ دقیقه گزارشی نیاورد ⇒ ممکن است دستگاه اجرا کرده باشد ⇒ «نامشخص»
  * (گزارش دیرهنگام هنوز پذیرفته می‌شود).
  */
-export async function expireStale() {
+async function expireStale() {
   const clientKeys = Object.entries(DRIVERS).filter(([, d]) => d.runsOn === "CLIENT").map(([k]) => k);
   if (!clientKeys.length) return;
   const stale = await prisma.cardReaderTransaction.findMany({ where: { status: "PENDING", driver: { in: clientKeys as any }, createdAt: { lt: new Date(Date.now() - CLIENT_RESULT_TIMEOUT_MS) } }, select: { id: true } });

@@ -17,7 +17,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
-import { partyDisplayName } from "./Users";
+
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
@@ -26,6 +26,8 @@ import { DELIVERY_DOWNSTREAM_ACTIONS, DeliveryFromQuotePrefill } from "../compon
 import { takeFormPrefill } from "../lib/formPrefill";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 // «حواله فروش» (مجوز خروج از انبار برای فروش) — سند واقعی حرکت انبار، جدا از حواله انبار مصرفی
 // موجود؛ ساختارش دقیقاً مطابق الگوی «رسید انبار خرید» است (رجوع کنید به یادداشت بالای
@@ -94,10 +96,6 @@ export default function SalesDeliveries() {
   if (isNew) return <SalesDeliveryForm />;
   if (isEdit) return <SalesDeliveryForm editId={Number(id)} />;
   return <SalesDeliveryList />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function SalesDeliveryList() {
@@ -227,7 +225,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("SALES_DELIVERY");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, setError, loaded, submit, remove } = useDocumentForm<
     { date: string; basis: Basis; warehouseId: string; partyId: string; description: string; details: DetailValues },
     RowState,
     Detail

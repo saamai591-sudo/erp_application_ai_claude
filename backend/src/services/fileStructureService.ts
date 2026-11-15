@@ -3,6 +3,7 @@ import { nextSerialNumber } from "../utils/coding";
 import { SYSTEM_STRUCTURES, type FieldDef, type FileDef, type StructureDef } from "../data/fileStructureDefaults";
 import { DICT_BY_KEY } from "./fileStructureDictionary";
 import { exprNames, parseExpr } from "../utils/fileFormats";
+import { collapseOrNull } from "../utils/inputParse";
 
 // ساختار فایل (فایل‌های بانک‌ها و سازمان‌ها): تعریف، اعتبارسنجی، ذخیره، کپی از ساختار پیش‌فرض نصب. تولید فایل: services/fileGeneratorService.ts.
 // ساختارهای پیش‌فرض نصب (data/fileStructureDefaults.ts) فقط‌خواندنی و در کد هستند؛ «کپی» یک نسخه‌ی دیتابیسی از آن می‌سازد و عنوان عامل‌های پیشنهادی را با
@@ -10,10 +11,8 @@ import { exprNames, parseExpr } from "../utils/fileFormats";
 
 export class FileStructureError extends Error {}
 
-const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ") : null);
-
 /** عنوان‌های پیشنهادی → شناسه‌ی عامل‌ها؛ عامل حکم در اولویت (عنوان یکسان در هر دو: فقط حکم) */
-export async function resolveSuggestions(def: StructureDef): Promise<{ def: StructureDef; unresolved: { field: string; title: string }[] }> {
+async function resolveSuggestions(def: StructureDef): Promise<{ def: StructureDef; unresolved: { field: string; title: string }[] }> {
   const [payroll, decree, calc] = await Promise.all([
     prisma.payrollComponent.findMany({ select: { id: true, title: true } }),
     prisma.decreeComponent.findMany({ select: { id: true, title: true } }),
@@ -51,11 +50,11 @@ export async function resolveSuggestions(def: StructureDef): Promise<{ def: Stru
 // ── اعتبارسنجی بدنه‌ی فرم → ساختار نرمال ──
 
 function cleanField(raw: any, file: FileDef, fileIdx: number, seqInFile: number): FieldDef {
-  const name = str(raw.name);
+  const name = collapseOrNull(raw.name);
   if (!name) throw new FileStructureError(`فایل ${fileIdx}: نام فیلد ردیف ${seqInFile} الزامی است`);
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new FileStructureError(`نام فیلد «${name}» فقط می‌تواند حروف انگلیسی، رقم و _ باشد`);
   if (file.format === "DBF" && name.length > 10) throw new FileStructureError(`نام فیلد DBF «${name}» حداکثر ۱۰ نویسه است`);
-  const title = str(raw.title) ?? name;
+  const title = collapseOrNull(raw.title) ?? name;
   const dataType = raw.dataType === "NUMBER" ? "NUMBER" : "TEXT";
   let length: number | null = null;
   if (raw.length !== undefined && raw.length !== null && raw.length !== "") {
@@ -92,7 +91,7 @@ function cleanField(raw: any, file: FileDef, fileIdx: number, seqInFile: number)
       break;
     }
     case "PARAM": {
-      const key = str(raw.paramKey);
+      const key = collapseOrNull(raw.paramKey);
       if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new FileStructureError(`کلید پارامتر «${name}» نامعتبر است (حروف انگلیسی، رقم و _)`);
       f.paramKey = key;
       f.constantValue = typeof raw.constantValue === "string" ? raw.constantValue : String(raw.constantValue ?? "");
@@ -103,12 +102,12 @@ function cleanField(raw: any, file: FileDef, fileIdx: number, seqInFile: number)
       if (raw.aggFunc !== "SUM" && raw.aggFunc !== "COUNT") throw new FileStructureError(`«${name}»: تابع مجموع‌گیری را انتخاب کنید`);
       f.aggFunc = raw.aggFunc;
       f.aggFileSeq = Number(raw.aggFileSeq) || null; // خالی = همین فایل
-      f.aggFieldName = str(raw.aggFieldName);
+      f.aggFieldName = collapseOrNull(raw.aggFieldName);
       if (!f.aggFieldName) throw new FileStructureError(`«${name}»: فیلد مبنای مجموع‌گیری را انتخاب کنید`);
       break;
     }
     case "EXPR": {
-      const t = str(raw.exprText);
+      const t = collapseOrNull(raw.exprText);
       if (!t) throw new FileStructureError(`«${name}»: فرمول الزامی است`);
       try {
         parseExpr(t);
@@ -125,19 +124,19 @@ function cleanField(raw: any, file: FileDef, fileIdx: number, seqInFile: number)
 }
 
 export function validateDef(b: any): StructureDef {
-  const title = str(b.title);
+  const title = collapseOrNull(b.title);
   if (!title) throw new FileStructureError("عنوان الزامی است");
   const rawFiles = Array.isArray(b.files) ? b.files : [];
   if (rawFiles.length === 0) throw new FileStructureError("دست‌کم یک فایل لازم است");
   const files: FileDef[] = rawFiles.map((rf: any, i: number) => {
-    const nameTemplate = str(rf.nameTemplate);
+    const nameTemplate = collapseOrNull(rf.nameTemplate);
     if (!nameTemplate) throw new FileStructureError(`فایل ${i + 1}: الگوی نام فایل الزامی است`);
     if (!/^[^\\/:*?"<>|]+$/.test(nameTemplate)) throw new FileStructureError(`فایل ${i + 1}: نام فایل نویسه‌ی غیرمجاز دارد`);
     const format = rf.format === "DBF" ? "DBF" : rf.format === "EXCEL" ? "EXCEL" : "DELIMITED";
     const delimiter = typeof rf.delimiter === "string" && rf.delimiter.length >= 1 && rf.delimiter.length <= 3 ? rf.delimiter : ",";
     const encoding = format === "DBF" ? "IRAN_SYSTEM" : format === "EXCEL" || rf.encoding === "UTF8" ? "UTF8" : "UTF8_BOM";
     if (format === "EXCEL" && !/\.xlsx?$/i.test(nameTemplate)) throw new FileStructureError(`فایل ${i + 1}: پسوند فایل اکسل باید .xls یا .xlsx باشد`);
-    const file: FileDef = { seq: i + 1, nameTemplate, format, sheetName: format === "EXCEL" ? str(rf.sheetName) ?? "Sheet1" : null, delimiter, encoding, lineEnding: rf.lineEnding === "CRLF" ? "CRLF" : "LF", trailingNewline: rf.trailingNewline !== false, fields: [] };
+    const file: FileDef = { seq: i + 1, nameTemplate, format, sheetName: format === "EXCEL" ? collapseOrNull(rf.sheetName) ?? "Sheet1" : null, delimiter, encoding, lineEnding: rf.lineEnding === "CRLF" ? "CRLF" : "LF", trailingNewline: rf.trailingNewline !== false, fields: [] };
     const rawFields = Array.isArray(rf.fields) ? rf.fields : [];
     if (rawFields.length === 0) throw new FileStructureError(`فایل ${i + 1}: دست‌کم یک فیلد لازم است`);
     file.fields = rawFields.map((fl: any, j: number) => cleanField(fl, file, i + 1, j + 1));
@@ -367,7 +366,7 @@ export async function listStructures() {
 export async function copyStructure(idOrKey: string | number, title?: string) {
   const src = await loadStructure(idOrKey);
   if (!src) throw new FileStructureError("ساختار یافت نشد");
-  const baseTitle = str(title) ?? `کپی ${src.def.title}`;
+  const baseTitle = collapseOrNull(title) ?? `کپی ${src.def.title}`;
   let t = baseTitle;
   for (let n = 2; await prisma.fileStructure.findUnique({ where: { title: t } }); n++) t = `${baseTitle} (${n})`;
   const created = await createStructure({ ...src.def, title: t, systemKey: null, bankPartyId: null, beneficiaryOrgId: null });

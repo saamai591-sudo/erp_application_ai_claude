@@ -22,6 +22,8 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
+import { recomputeAmount } from "../lib/rowHelpers";
 
 // طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد —
 // یک نمای واحد است که ستون‌های مبلغی بر اساس مجوز کاربر نمایش داده می‌شوند، نه بر اساس مسیر URL. دقیقاً
@@ -110,14 +112,6 @@ export default function InitialInventory() {
   if (isNew) return <InitialInventoryForm basePath={basePath} />;
   if (isEdit) return <InitialInventoryForm basePath={basePath} editId={Number(id)} />;
   return <InitialInventoryList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 function InitialInventoryList({ basePath }: { basePath: string }) {
@@ -252,15 +246,6 @@ function emptyRow(): RowState {
 // طبق بند ۳-۴ «مستند عمومی عملیات انبار»: مبلغ باید بر اساس تعداد ارقام اعشار «ارز پایه» گرد شود، نه
 // یک عدد هاردکد (قبلاً همیشه ۲ رقم بود). این تابع فقط برای پیش‌نمایش لحظه‌ای در فرانت‌اند است؛ مرجع
 // نهایی محاسبه، بک‌اند (`computeAmount` در initialInventory.ts) است.
-function recomputeAmount(row: RowState, baseDecimalPlaces: number): RowState {
-  const qty = Number(row.quantity) || 0;
-  const cost = Number(row.unitCost) || 0;
-  if (!qty) return { ...row, amount: "" };
-  const factor = Math.pow(10, baseDecimalPlaces);
-  const amount = Math.round(qty * cost * factor) / factor;
-  return { ...row, amount: amount ? String(amount) : "" };
-}
-
 function recomputeUnitCostFromAmount(row: RowState): RowState {
   const qty = Number(row.quantity) || 0;
   const amount = Number(row.amount) || 0;
@@ -296,7 +281,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
 
   const detailConfig = useDocDetailConfig("INITIAL_INVENTORY");
-  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, flash, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, setMeta, error, setError, loaded, flash, submit, remove } = useDocumentForm<
     { warehouseId: string; date: string; description: string; details: DetailValues },
     RowState,
     Detail

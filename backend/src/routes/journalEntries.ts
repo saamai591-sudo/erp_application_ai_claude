@@ -2,6 +2,7 @@ import { Router } from "express";
 import { auditRoute } from "../middleware/auditEvent";
 import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { renumberJournalEntries } from "../services/journalEntryRenumberService";
+import { registerJournalLineDiff, snapshotJournalLines } from "../services/auditService";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { assertLineHasAmount } from "../utils/journalEntryValidation";
 import { issueJournalEntry } from "../services/journalEntryService";
@@ -85,6 +86,22 @@ type FiltersMap = Record<string, FilterSpec>;
 
 // معادل فارسی وضعیت سند — برای ترجمه‌ی عبارت جستجوی فیلتر «وضعیت» (که روی برچسب فارسی اعمال می‌شود) به مقدار enum
 const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
+
+// معادل فارسی سیستم صادرکننده — برای ترجمه‌ی عبارت جستجوی فیلتر «سیستم صادرکننده» به مقدار enum (هم‌خوان با frontend/src/lib/issuingSystemLabels.ts)
+const ISSUING_SYSTEM_FA: Record<string, string> = {
+  ACCOUNTING: "حسابداری",
+  ACCOUNTING_EXCEL_IMPORT: "حسابداری (ورود از اکسل)",
+  DATA_MIGRATION: "مهاجرت داده",
+  ACCOUNT_CLOSING: "بستن حسابها",
+  OPENING_CLOSING: "افتتاحیه و اختتامیه",
+  WAREHOUSE: "اسناد انبار",
+  PURCHASE: "فاکتور خرید",
+  SALES: "فروش",
+  TREASURY: "خزانه‌داری",
+  FIXED_ASSET: "دارایی ثابت",
+  PRODUCTION: "تولید",
+  PAYROLL: "حقوق و دستمزد",
+};
 
 function parseFilters(raw: unknown): FiltersMap {
   if (!raw || typeof raw !== "string") return {};
@@ -195,6 +212,24 @@ router.get("/", can(`${FORM}.view`), async (req, res) => {
     const w = stringWhere(filters.description);
     if (w) andConditions.push({ description: w });
   }
+  if (filters.issuingSystem) {
+    const f = filters.issuingSystem;
+    if (f.operator === "empty") {
+      andConditions.push({ id: -1 }); // سیستم صادرکننده همیشه مقدار دارد
+    } else if (f.operator === "contains" || f.operator === "notContains") {
+      const needle = (f.value ?? "").trim();
+      if (needle) {
+        const matched = Object.entries(ISSUING_SYSTEM_FA)
+          .filter(([, label]) => label.includes(needle))
+          .map(([key]) => key);
+        if (f.operator === "contains") {
+          andConditions.push(matched.length ? { issuingSystem: { in: matched } } : { id: -1 });
+        } else if (matched.length) {
+          andConditions.push({ issuingSystem: { notIn: matched } });
+        }
+      }
+    }
+  }
   if (filters.status) {
     const f = filters.status;
     if (f.operator === "empty") {
@@ -223,6 +258,7 @@ router.get("/", can(`${FORM}.view`), async (req, res) => {
       date: { date: dir },
       referenceNumber: { referenceNumber: dir },
       documentTypeTitle: { documentType: { title: dir } },
+      issuingSystem: { issuingSystem: dir },
       description: { description: dir },
       status: { status: dir },
     } as Record<string, any>)[field];
@@ -380,6 +416,9 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
       const lastNumber = await prisma.journalEntry.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
       number = lastNumber ? lastNumber.number + 1 : 1;
     }
+
+    // لاگ تغییرات (سطح FULL): ردیف‌های قبل و بعد مقایسه می‌شوند و تفاوت در همان ردیف لاگ سند ثبت می‌شود
+    await registerJournalLineDiff(id, await snapshotJournalLines(id), computedLines);
 
     await prisma.$transaction([
       prisma.journalEntryLine.deleteMany({ where: { journalEntryId: id } }),

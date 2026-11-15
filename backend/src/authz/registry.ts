@@ -122,8 +122,6 @@ export const REGISTRY: ModuleDef[] = [
             baseActions: ["view", "edit"],
             actions: [{ key: "run", title: "اجرای دستی" }],
           },
-          // API «ورود داده» برای برنامه‌ی مهاجرت از سیستم‌های قبلی (مثلاً سام)؛ فقط کلید مجوز، بدون صفحه در منو
-          { key: "data-migration", title: "مهاجرت داده", baseActions: [], actions: [{ key: "run", title: "اجرای ورود داده" }] },
         ],
       },
       {
@@ -300,6 +298,11 @@ export const REGISTRY: ModuleDef[] = [
           { key: "warehouse-doc-details", title: "تفصیل‌های سند انبار", baseActions: CRUD, requiresModule: "inventory" },
           { key: "detail-rules", title: "قواعد تفصیل", baseActions: CRUD },
         ],
+      },
+      {
+        key: "bom",
+        title: "فرمول ساخت",
+        forms: [{ key: "boms", title: "فرمول ساخت (BOM)", baseActions: CRUD, requiresModule: "production" }],
       },
       {
         key: "operations",
@@ -604,6 +607,86 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "production",
+    title: "مدیریت تولید",
+    subModules: [
+      {
+        key: "config",
+        title: "تنظیمات",
+        forms: [
+          { key: "cost-structure", title: "ساختار بهای تمام‌شده", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
+          { key: "cost-collectors", title: "عامل جمع‌آوری هزینه‌ها", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
+          { key: "cost-time-drivers", title: "مبناهای زمانی تسهیم", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
+          { key: "production-time-sheets", title: "زمان‌بندی تولید", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
+
+          { key: "item-planning", title: "پارامترهای برنامه‌ریزی کالا", baseActions: CRUD, requiresFeature: "PRODUCTION_MRP" },
+        ],
+      },
+      {
+        key: "output",
+        title: "تولید",
+        forms: [
+          { key: "production-stats", title: "آمار تولید", baseActions: CRUD },
+          { key: "production-deliveries", title: "تحویل تولید", baseActions: CRUD },
+        ],
+      },
+      {
+        key: "operations",
+        title: "عملیات",
+        forms: [
+          {
+            key: "production-orders",
+            title: "دستور تولید",
+            baseActions: CRUD,
+            actions: [
+              { key: "release", title: "صدور دستور" },
+              { key: "close", title: "بستن دستور" },
+              { key: "reopen", title: "بازکردن دستور" },
+              { key: "createConsumption", title: "ایجاد سند مصرف از دستور" },
+              { key: "createChildren", title: "ساخت دستورهای سطح پایین برای کسری" },
+            ],
+          },
+          {
+            key: "wip-counts",
+            title: "موجودی پای کار",
+            baseActions: CRUD,
+            actions: [{ key: "approve", title: "تایید" }, { key: "unapprove", title: "برگشت از تایید" }],
+            requiresFeature: "PRODUCTION_COSTING",
+          },
+          {
+            key: "production-costing",
+            title: "محاسبه بهای تمام‌شده تولید",
+            baseActions: ["view"],
+            actions: [
+              { key: "calculate", title: "محاسبه" },
+              { key: "deleteCalculation", title: "حذف محاسبه" },
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری" },
+            ],
+            requiresFeature: "PRODUCTION_COSTING",
+          },
+          {
+            key: "mrp-runs",
+            title: "برنامه‌ریزی نیاز مواد (MRP)",
+            baseActions: ["view", "create", "delete"],
+            actions: [{ key: "convert", title: "تبدیل به دستور تولید/درخواست تامین" }],
+            requiresFeature: "PRODUCTION_MRP",
+          },
+        ],
+      },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [
+          { key: "production-cost-report", title: "گزارش بهای تمام‌شده تولید", baseActions: ["view"], requiresFeature: "PRODUCTION_COSTING" },
+          { key: "production-order-cost-report", title: "گزارش بهای تمام‌شده به تفکیک دستور", baseActions: ["view"], requiresFeature: "PRODUCTION_COSTING" },
+          { key: "production-variance-report", title: "گزارش مصرف در برابر فرمول", baseActions: ["view"] },
+          { key: "production-plan-report", title: "گزارش برنامه در برابر انجام", baseActions: ["view"] },
+        ],
+      },
+    ],
+  },
+  {
     key: "customer-club",
     title: "باشگاه مشتریان",
     subModules: [
@@ -798,6 +881,13 @@ export const REGISTRY: ModuleDef[] = [
           { key: "attendance-request-types", title: "نوع درخواست", baseActions: CRUD },
           { key: "attendance-leave-entitlements", title: "قاعده‌ی استحقاق مرخصی", baseActions: CRUD },
           { key: "attendance-mission-types", title: "نوع ماموریت", baseActions: CRUD },
+          {
+            key: "attendance-device-connections",
+            title: "اتصال دستگاه حضور و غیاب",
+            baseActions: CRUD,
+            actions: [{ key: "regenerateToken", title: "تولید مجدد توکن" }],
+          },
+          { key: "attendance-device-mappings", title: "نگاشت شناسه‌ی دستگاه", baseActions: CRUD },
         ],
       },
       {
@@ -830,6 +920,12 @@ export const REGISTRY: ModuleDef[] = [
             ],
           },
           { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
+          {
+            key: "attendance-device-inbox",
+            title: "ثبت‌های دریافتی از دستگاه",
+            baseActions: ["view", "delete"],
+            actions: [{ key: "reprocess", title: "پردازش مجدد" }],
+          },
         ],
       },
       {
@@ -1221,7 +1317,7 @@ export interface FlatAction {
   formTitle: string;
 }
 
-export function flattenRegistry(): FlatAction[] {
+function flattenRegistry(): FlatAction[] {
   const out: FlatAction[] = [];
   for (const mod of REGISTRY) {
     for (const sub of mod.subModules) {
@@ -1266,7 +1362,7 @@ function getFlat(): FlatAction[] {
   return cachedFlat;
 }
 
-export function getActionKeySet(): Set<string> {
+function getActionKeySet(): Set<string> {
   if (!cachedKeySet) cachedKeySet = new Set(getFlat().map((a) => a.key));
   return cachedKeySet;
 }

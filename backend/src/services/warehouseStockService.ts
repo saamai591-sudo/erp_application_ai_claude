@@ -91,6 +91,18 @@ export const SIGNED_TYPES: SignedTypeRule[] = [
   { documentType: "TEMP_RECEIPT_RETURN", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeTempReceiptReturnId" },
 ];
 
+/**
+ * جهت اسنادِ دارای اثر ریالی، مشتق از SIGNED_TYPES (تنها منبع حقیقتِ جهت هر نوع سند): «رسید/برگشت رسید موقت» فقط تعدادی‌اند و
+ * اثر ریالی/حسابداری ندارند؛ «اضافات انبارگردانی» خودش امضادار ذخیره می‌شود و جزو SIGNED_TYPES نیست ولی وارده است.
+ * قبلاً همین فهرست‌ها دستی در warehouseMovementService و routes/goodsAccounting کپی شده بود.
+ */
+const QUANTITY_ONLY_DOC_TYPES = new Set(["TEMP_RECEIPT", "TEMP_RECEIPT_RETURN"]);
+export const VALUED_OUTBOUND_DOC_TYPES: ReadonlySet<string> = new Set(SIGNED_TYPES.filter((r) => r.sign === -1 && !QUANTITY_ONLY_DOC_TYPES.has(r.documentType)).map((r) => r.documentType));
+export const VALUED_INBOUND_DOC_TYPES: ReadonlySet<string> = new Set([
+  ...SIGNED_TYPES.filter((r) => r.sign === 1 && !QUANTITY_ONLY_DOC_TYPES.has(r.documentType)).map((r) => r.documentType),
+  "WAREHOUSE_ADJUSTMENT",
+]);
+
 function sum(rows: { quantity: any }[]): number {
   return rows.reduce((s: number, l: any) => s + Number(l.quantity), 0);
 }

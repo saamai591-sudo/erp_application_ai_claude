@@ -4,8 +4,9 @@ import { getRequestContext } from "../lib/requestContext";
 import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { assertLineAmountDecimals } from "../utils/amountDecimals";
+import { getBaseCurrency } from "./baseCurrencyService";
 
-export type IssuingSystemType = "PAYROLL" | "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY" | "FIXED_ASSET";
+export type IssuingSystemType = "PAYROLL" | "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY" | "FIXED_ASSET" | "PRODUCTION";
 
 export interface IssueLineInput {
   accountId: number;
@@ -61,7 +62,7 @@ export interface IssueJournalEntryResult {
   message: string;
 }
 
-export const JOURNAL_ENTRY_ISSUED_MESSAGE = "سند با موفقیت صادر شد";
+const JOURNAL_ENTRY_ISSUED_MESSAGE = "سند با موفقیت صادر شد";
 
 /** سیگنال «صدور آزمایشی»: همه‌ی اعتبارسنجی‌های صدور سند گذشته و سند آماده‌ی نوشتن بود، ولی چیزی نوشته نشد (فقط در زمینه‌ی dryRunIssue) */
 export const ISSUE_DRY_RUN_MESSAGE = "صدور آزمایشی: سند معتبر است و صادر می‌شد";
@@ -97,8 +98,7 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
     throw new Error("تاریخ سند نامعتبر است");
   }
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({
     where: { fromDate: { lte: opts.date }, toDate: { gte: opts.date } },

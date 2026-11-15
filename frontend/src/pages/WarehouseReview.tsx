@@ -218,7 +218,7 @@ const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(ledgerC
 export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   const { openTab } = useTabs();
   const snapshot = getWarehouseReviewSnapshot(mode);
-  const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
+  const [, setPeriods] = useState<FiscalPeriodRange[]>([]);
   const [groupLevels, setGroupLevels] = useState<GroupLevel[]>([]);
   const [levelsLoaded, setLevelsLoaded] = useState(false);
   const [filters, setFilters] = useState(snapshot?.filters ?? { fromDate: "", toDate: "" });

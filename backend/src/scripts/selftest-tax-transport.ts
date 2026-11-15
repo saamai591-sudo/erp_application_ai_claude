@@ -66,7 +66,7 @@ const server = http.createServer((req, res) => {
       return send({ errors: [{ detail: "unknown", errorCode: "X" }] });
     }
     if (url.endsWith("/async/normal-enqueue")) {
-      const { signatureKeyId: _k, ...rest } = body;
+      const { signatureKeyId: _k } = body;
       const packetsNoKeyId = body.packets.map((p: any) => {
         const { signatureKeyId: _s, ...r } = p;
         return r;

@@ -24,7 +24,7 @@ function run(cmd, cmdArgs, cwd = root) {
   console.log(`\n$ ${cmd} ${cmdArgs.join(" ")}`);
   const r = spawnSync(cmd, cmdArgs, { cwd, stdio: "inherit", shell: false });
   if (r.status !== 0) {
-    console.error(`\n✗ شکست: ${cmd} (کد ${r.status})`);
+    console.error(`\n✗ Failed: ${cmd} (exit code ${r.status})`);
     process.exit(r.status ?? 1);
   }
 }
@@ -33,7 +33,7 @@ const be = `${registry}/accounting-erp-backend`;
 const fe = `${registry}/accounting-erp-frontend`;
 mkdirSync(out, { recursive: true });
 
-console.log(`ساخت نسخه‌ی ${version}`);
+console.log(`Building version ${version}`);
 run("docker", ["build", "-f", "Dockerfile.release", "-t", `${be}:${version}`, "-t", `${be}:latest`, "."], join(root, "backend"));
 run("docker", ["build", "-f", "Dockerfile.release", "-t", `${fe}:${version}`, "-t", `${fe}:latest`, "."], join(root, "frontend"));
 
@@ -52,7 +52,7 @@ await new Promise((res, rej) => {
   createReadStream(tar).on("data", (d) => hash.update(d)).on("end", res).on("error", rej);
 });
 const sha = hash.digest("hex");
-console.log(`\n✓ ${tar}\n  حجم: ${(statSync(tar).size / 1048576).toFixed(0)} MB\n  sha256: ${sha}\n  شروع checksum: ${sha.slice(0, 16)}\n  source map‌ها: ${maps}`);
+console.log(`\n✓ ${tar}\n  size: ${(statSync(tar).size / 1048576).toFixed(0)} MB\n  sha256: ${sha}\n  checksum start: ${sha.slice(0, 16)}\n  source maps: ${maps}`);
 
 }
 
@@ -70,7 +70,7 @@ if (args.includes("--push")) {
   const digestOf = (image) => {
     const r = spawnSync("docker", ["inspect", "--format", "{{json .RepoDigests}}", image], { encoding: "utf8" });
     const list = JSON.parse(r.stdout || "[]").filter((d) => d.startsWith(image.slice(0, image.lastIndexOf(":")) + "@"));
-    if (!list.length) throw new Error(`digest برای ${image} پیدا نشد (push موفق نبود؟)`);
+    if (!list.length) throw new Error(`digest for ${image} not found (did the push fail?)`);
     return list[0].split("@")[1];
   };
 
@@ -107,5 +107,5 @@ if (args.includes("--push")) {
   const rel = `${registry}/accounting-erp-release`;
   run("docker", ["build", "--provenance=false", "--sbom=false", "-t", `${rel}:${version}`, dir]);
   run("docker", ["push", `${rel}:${version}`]);
-  console.log(`\n✓ نسخه‌ی ${version} در ${registry} منتشر شد (manifest امضاشده: ${rel}:${version})`);
+  console.log(`\n✓ Version ${version} published to ${registry} (signed manifest: ${rel}:${version})`);
 }

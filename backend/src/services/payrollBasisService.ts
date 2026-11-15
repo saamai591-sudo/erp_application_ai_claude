@@ -12,7 +12,7 @@ import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
 export type FactorBasis = "decree" | "payroll";
 
 /** شناسه‌ی مبناهای انتخاب‌شده را برای یک عامل اعتبارسنجی می‌کند؛ keep = مبناهایی که از قبل عضوند (حتی اگر غیرفعال شده باشند) */
-export async function checkBasisSelection(factor: { basis: FactorBasis; kind: string }, raw: unknown, keep: number[] = []): Promise<number[]> {
+async function checkBasisSelection(factor: { basis: FactorBasis; kind: string }, raw: unknown, keep: number[] = []): Promise<number[]> {
   const ids = [...new Set((Array.isArray(raw) ? raw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   if (ids.length === 0) return [];
   if (factor.basis === "payroll" && factor.kind !== "EARNING") throw new PayrollCalcError("مبنا فقط برای عامل حکم و عامل حقوق از طبقه‌ی «پرداختی» قابل انتخاب است");
@@ -29,7 +29,7 @@ export async function checkBasisSelection(factor: { basis: FactorBasis; kind: st
 }
 
 /** مبناهایی که برای عامل باید تعیین تکلیف شوند: مبناهای فعال قابل‌اعمال (عامل حکم همه؛ عامل حقوق «پرداختی» فقط منبع محاسبات) */
-export async function applicableBasisRows(factor: { basis: FactorBasis; kind: string }) {
+async function applicableBasisRows(factor: { basis: FactorBasis; kind: string }) {
   if (factor.basis === "payroll" && factor.kind !== "EARNING") return [];
   return prisma.payrollParameter.findMany({
     where: { kind: "BASIS", isActive: true, ...(factor.basis === "payroll" ? { basisSource: "CALC" as const } : {}) },
@@ -188,7 +188,7 @@ export interface BulkResult {
  */
 export async function bulkChangeMembers(parameterId: number, action: "add" | "remove", year: unknown, month: unknown, factors: { basis: FactorBasis; id: number }[]): Promise<BulkResult[]> {
   if (action !== "add" && action !== "remove") throw new PayrollCalcError("عمل نامعتبر است");
-  const p = await getBasis(parameterId);
+  await getBasis(parameterId);
   const m = await monthRow(year, month);
   if (!Array.isArray(factors) || factors.length === 0) throw new PayrollCalcError("حداقل یک عامل را انتخاب کنید");
   const [decree, comps] = await Promise.all([

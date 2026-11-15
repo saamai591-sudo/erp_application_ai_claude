@@ -106,7 +106,6 @@ function GeoTree() {
 
 function CountryForm() {
   const navigate = useNavigate();
-  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const { create } = useCrud<TreeNode>("/geo-regions");
@@ -142,7 +141,6 @@ function CountryForm() {
 
 function NodeEditForm({ editId }: { editId: number }) {
   const navigate = useNavigate();
-  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [title, setTitle] = usePersistedState(`${cacheKey}:title`, "");

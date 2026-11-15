@@ -36,7 +36,6 @@ function GroupList() {
   const cacheKey = "/warehouse-groups";
   const [items, setItems] = usePersistedState<WarehouseGroup[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/warehouse-groups").then(setItems).catch((e) => setError(e.message));

@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -32,14 +31,6 @@ interface HeaderBody {
   orgUnitId: number;
   description?: string;
   lines: LineInput[];
-}
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
 }
 
 async function validateAndCleanLines(lines: LineInput[], basis: string) {
@@ -214,7 +205,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     if (!orgUnit) throw new Error("واحد سازمانی یافت نشد");
 
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const lines = await validateAndCleanLines(body.lines, body.basis);
 
     const lastNumber = await prisma.supplyRequest.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
@@ -268,7 +259,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!orgUnit) throw new Error("واحد سازمانی یافت نشد");
 
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const lines = await validateAndCleanLines(body.lines, body.basis);
 
     await prisma.$transaction([

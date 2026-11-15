@@ -18,10 +18,12 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
-import { partyDisplayName } from "./Users";
+
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 // «برگشت از فروش» — طبق stockAnalysis.md بند ۳۴؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/salesReturns.ts برای توضیح طراحی (سکوت مستند در این مورد، هم‌الگوی بند ۴۰). طبق
@@ -60,10 +62,6 @@ export default function SalesReturns() {
   if (isNew) return <SalesReturnForm basePath={basePath} />;
   if (isEdit) return <SalesReturnForm basePath={basePath} editId={Number(id)} />;
   return <SalesReturnList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function SalesReturnList({ basePath }: { basePath: string }) {
@@ -140,7 +138,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("SALES_RETURN");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; partyId: string; description: string; details: DetailValues },
     RowState,
     Detail

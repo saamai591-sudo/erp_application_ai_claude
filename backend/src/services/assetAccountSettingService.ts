@@ -22,19 +22,19 @@ export const ASSET_ACCOUNT_TYPES: { key: string; title: string; perInsuranceType
 ];
 const BY_KEY = new Map(ASSET_ACCOUNT_TYPES.map((t) => [t.key, t]));
 
-/** کد انواع تفصیلی که سیستم برای هر نوع حساب می‌تواند خودش پر کند: ۱ طرف حساب، ۲ مرکز هزینه، ۸ پروژه، ۹ دارایی ثابت */
+/** کد انواع تفصیلی که سیستم برای هر نوع حساب می‌تواند خودش پر کند: ۱ طرف حساب، ۲ مرکز هزینه، ۸ پروژه */
 const ALLOWED_DETAIL_CODES: Record<string, number[]> = {
-  ASSET_COST: [2, 8, 9],
-  DEPRECIATION_EXPENSE: [2, 8, 9],
-  ACCUMULATED_DEPRECIATION: [2, 8, 9],
-  INSURANCE_EXPENSE: [1, 2, 8, 9],
-  PREPAID_INSURANCE: [1, 2, 8, 9],
-  SALE_GAIN_LOSS: [1, 2, 8, 9],
-  INSURANCE_GAIN_LOSS: [1, 2, 8, 9],
-  REPAIR_EXPENSE: [1, 2, 8, 9],
-  DONATION_EXPENSE: [1, 2, 8, 9],
-  SCRAP_LOSS: [2, 8, 9],
-  PRIOR_PERIOD_ADJUSTMENT: [2, 8, 9],
+  ASSET_COST: [2, 8],
+  DEPRECIATION_EXPENSE: [2, 8],
+  ACCUMULATED_DEPRECIATION: [2, 8],
+  INSURANCE_EXPENSE: [1, 2, 8],
+  PREPAID_INSURANCE: [1, 2, 8],
+  SALE_GAIN_LOSS: [1, 2, 8],
+  INSURANCE_GAIN_LOSS: [1, 2, 8],
+  REPAIR_EXPENSE: [1, 2, 8],
+  DONATION_EXPENSE: [1, 2, 8],
+  SCRAP_LOSS: [2, 8],
+  PRIOR_PERIOD_ADJUSTMENT: [2, 8],
 };
 
 const fail = (msg: string): never => {
@@ -51,7 +51,7 @@ async function assertAccountUsable(accountId: number, accountType: string) {
   const allowed = ALLOWED_DETAIL_CODES[accountType] ?? [];
   for (const dt of [acc!.detailType1, acc!.detailType2, acc!.detailType3]) {
     if (dt && !allowed.includes(dt.code)) {
-      fail(`حساب «${acc!.title}» به نوع تفصیل «${dt.title}» وصل است که سیستم برای این نوع حساب نمی‌تواند خودکار پر کند (مجاز: ${allowed.map((c) => ({ 1: "طرف حساب", 2: "مرکز هزینه", 8: "پروژه", 9: "دارایی ثابت" } as Record<number, string>)[c]).join("، ")})`);
+      fail(`حساب «${acc!.title}» به نوع تفصیل «${dt.title}» وصل است که سیستم برای این نوع حساب نمی‌تواند خودکار پر کند (مجاز: ${allowed.map((c) => ({ 1: "طرف حساب", 2: "مرکز هزینه", 8: "پروژه" } as Record<number, string>)[c]).join("، ")})`);
     }
   }
 }

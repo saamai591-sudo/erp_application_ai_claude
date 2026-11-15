@@ -19,8 +19,8 @@ import { AttendanceError, dayStr, minuteText, parseDay } from "./attendancePunch
 const DAY = 1440;
 const WEEKLY_LEN = 7;
 const MAX_ROTATION = 62;
-export const DEFAULT_WINDOW_LEAD = 240;
-export const MAX_SEGMENTS = 6;
+const DEFAULT_WINDOW_LEAD = 240;
+const MAX_SEGMENTS = 6;
 
 export interface SegmentInput {
   startClock: number;
@@ -63,7 +63,7 @@ const int = (v: unknown, label: string, min: number, max: number): number => {
 const mod = (a: number, n: number) => ((a % n) + n) % n;
 
 /** بازه‌های «ساعت روی ساعت» یک روز → دقیقه‌های مطلق (پایان کوچک‌تر/مساوی شروع ⇒ روز بعد؛ هر بازه‌ی بعدی بعد از پایان قبلی) */
-export function resolveSegments(raw: { startClock: number; endClock: number }[], label: string): { startMinute: number; endMinute: number }[] {
+function resolveSegments(raw: { startClock: number; endClock: number }[], label: string): { startMinute: number; endMinute: number }[] {
   const out: { startMinute: number; endMinute: number }[] = [];
   let prevEnd = -1;
   for (const [i, s] of raw.entries()) {
@@ -80,10 +80,10 @@ export function resolveSegments(raw: { startClock: number; endClock: number }[],
   return out;
 }
 
-export const totalMinutesOf = (segs: { startMinute: number; endMinute: number }[]) => segs.reduce((s, x) => s + (x.endMinute - x.startMinute), 0);
+const totalMinutesOf = (segs: { startMinute: number; endMinute: number }[]) => segs.reduce((s, x) => s + (x.endMinute - x.startMinute), 0);
 
 /** ساعتِ ورودیِ شروع پنجره → دقیقه نسبت به ابتدای روز: بازه‌ی کاری: آخرین ساعتِ هم‌نام که دیرتر از شروع بازه نباشد؛ روز استراحت: ساعتِ همان روز */
-export function resolveWindowStart(clock: number, segStart: number | null): number {
+function resolveWindowStart(clock: number, segStart: number | null): number {
   return segStart === null ? clock : segStart - mod(segStart - clock, DAY);
 }
 

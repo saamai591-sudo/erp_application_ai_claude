@@ -16,7 +16,8 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
-import { partyDisplayName } from "./Users";
+import { partyDisplayName } from "../lib/partyDisplay";
+
 
 // باشگاه مشتریان › عملیات › «کارت وفاداری»: طرف‌حساب + شماره‌ی کارت + کلمه‌ی عبور + تاریخ صدور/انقضا. کلمه‌ی عبور فقط به‌صورت هش نگهداری می‌شود
 // و هنگام تسویه‌ی فروش فروشگاهی با کارت باید دوباره وارد شود. قواعد در سرور (services/loyaltyService.ts).

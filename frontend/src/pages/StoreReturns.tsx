@@ -16,7 +16,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { StorePaymentDialog } from "../components/StorePaymentDialog";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
-import { formatJalaliDate, localTodayIso } from "../lib/formatDate";
+import { formatJalaliDate } from "../lib/formatDate";
 import { api, ApiError } from "../lib/api";
 import { showError, showToast } from "../lib/toast";
 import { fetchSelectedFiscalPeriod, defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -24,13 +24,13 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { partyTitleOf } from "../lib/partyDisplay";
+import { toEnglishDigits } from "../lib/digits";
 
 // فروش فروشگاهی › عملیات › «برگشت فروش»: سند مستقل با شیفت + تاریخ (مثل فروش)؛ «فروش مبنا» اختیاری است — با مبنا ردیف‌ها از همان فروش می‌آیند و مقدار برگشتی هر ردیف از «مانده‌ی قابل برگشت» بیشتر نمی‌شود؛ بدون مبنا (مثلاً فروشِ قبل از راه‌اندازی سیستم) کالا با بارکد/جست‌وجو اضافه می‌شود و فی از اعلامیه‌ی قیمت ایستگاه است.
 // اثر انبار و حسابداری فقط با «تحویل فروش» بعدی ایستگاه می‌آید (ردیف نوع «برگشت فروش»)؛ بازپرداخت پول با «پرداخت فروشگاهی» (آیکن پرداخت همین فرم). قواعد در سرور (services/storeReturnService.ts).
 
 /** ارقام فارسی/عربی → لاتین (بارکدخوان و تایپ دستی یکسان جست‌وجو شوند) */
-const normDigits = (v: string) => v.replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
-
 interface RetRow {
   id: number;
   number: number;
@@ -136,8 +136,6 @@ interface SellableResponse {
   items: Sellable[];
   canChangePrice: boolean;
 }
-const customerTitleOf = (c: CustomerOpt) => c.party.detailTitle || (c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim());
-
 export default function StoreReturns() {
   const location = useLocation();
   const { id } = useParams();
@@ -308,13 +306,13 @@ function ReturnForm({ editId }: { editId?: number }) {
   const itemMap = useMemo(() => new Map((sell?.items ?? []).map((i) => [i.id, i])), [sell]);
   const byBarcode = useMemo(() => {
     const m = new Map<string, Sellable>();
-    for (const i of sell?.items ?? []) if (i.barcode) m.set(normDigits(i.barcode.trim()), i);
+    for (const i of sell?.items ?? []) if (i.barcode) m.set(toEnglishDigits(i.barcode.trim()), i);
     return m;
   }, [sell]);
   /** جست‌وجوی «بارکد» هم کد کالا را می‌پذیرد (بارکد اولویت دارد) */
   const byCode = useMemo(() => {
     const m = new Map<string, Sellable>();
-    for (const i of sell?.items ?? []) if (i.fullCode) m.set(normDigits(i.fullCode.trim()), i);
+    for (const i of sell?.items ?? []) if (i.fullCode) m.set(toEnglishDigits(i.fullCode.trim()), i);
     return m;
   }, [sell]);
   const dp = sell?.decimalPlaces ?? 0;
@@ -373,7 +371,7 @@ function ReturnForm({ editId }: { editId?: number }) {
   function onBarcodeEnter() {
     const code = barcode.trim();
     if (!code) return;
-    const key = normDigits(code);
+    const key = toEnglishDigits(code);
     const it = byBarcode.get(key) ?? byCode.get(key);
     if (it) addItem(it);
     else interpretAndAdd(code);
@@ -498,11 +496,11 @@ function ReturnForm({ editId }: { editId?: number }) {
               <RecordPickerField<CustomerOpt>
                 title="انتخاب مشتری"
                 disabled={!ready || hasBasis}
-                displayValue={customer ? `${toFaDigits(String(customer.code))} — ${customerTitleOf(customer)}` : station ? `${toFaDigits(String(station.customerCode ?? ""))} — ${station.customerTitle}` : ""}
+                displayValue={customer ? `${toFaDigits(String(customer.code))} — ${partyTitleOf(customer)}` : station ? `${toFaDigits(String(station.customerCode ?? ""))} — ${station.customerTitle}` : ""}
                 rows={customers}
                 columns={[
                   { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                  { header: "عنوان", render: (x) => customerTitleOf(x), filterValue: (x) => customerTitleOf(x) },
+                  { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
                 ]}
                 onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
               />

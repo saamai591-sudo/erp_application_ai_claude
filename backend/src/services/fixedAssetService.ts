@@ -11,22 +11,17 @@ import { getAssetLineAmounts, setAssetLineAmount } from "./assetAmountService";
 //  • تعریف دارایی از «مانده‌ی» ردیف‌های رسید پلاک می‌سازد: یک ردیف ← چند پلاک، یا چند ردیف (و بخشی از مقدار هر ردیف) ← یک پلاک مونتاژی.
 //  • موقعیت (مرکز هزینه + پروژه اختیاری) تاریخ‌دار است؛ استهلاک در مرحله بعد بر مبنای همین موقعیت‌ها محاسبه می‌شود.
 
-const DETAIL_TYPE_FIXED_ASSET = 9;
 const D = (v: any) => new Prisma.Decimal(v ?? 0);
 const day = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 
-import { AssetError } from "./assetError";
+import { AssetError, assetBulkFail } from "./assetError";
 import { assertLocationSelectable } from "./assetLocationService";
 import { lastAnyCalculatedEnd as lastCalculatedEnd } from "./assetDepreciationService";
+import { getBaseCurrencyDecimals } from "./baseCurrencyService";
 export { AssetError };
 const fail = (msg: string): never => {
   throw new AssetError(msg);
 };
-
-async function baseDecimals(): Promise<number> {
-  const c = await prisma.currency.findFirst({ where: { isBase: true } });
-  return c?.decimalPlaces ?? 0;
-}
 
 function parseDate(v: unknown, label: string): Date {
   const d = new Date(String(v ?? ""));
@@ -260,18 +255,12 @@ function allocateByQuantity(total: Prisma.Decimal, sourceQty: Prisma.Decimal, ro
   return out;
 }
 
-function bulkFail(summary: string, details: Record<string, unknown>[]): never {
-  const err = new AssetError(summary);
-  err.details = details;
-  throw err;
-}
-
 export async function confirmAssetReceipt(id: number) {
   const r = await prisma.assetReceipt.findUnique({ where: { id }, include: { lines: { orderBy: { rowOrder: "asc" }, include: { goodsItem: { select: { title: true } } } } } });
   if (!r) return fail("رسید دارایی یافت نشد");
   if (r.status === "FINALIZED") fail("این رسید قبلاً تایید شده است");
   if (r.basis !== "WAREHOUSE_ISSUE") fail("این رسید همزمان با تایید فاکتور خرید تایید می‌شود؛ تایید دستی فقط برای رسید با مبنای حواله انبار است");
-  const dec = await baseDecimals();
+  const dec = await getBaseCurrencyDecimals();
   const problems: Record<string, unknown>[] = [];
   const amounts = new Map<number, Prisma.Decimal>();
   for (const [i, l] of r.lines.entries()) {
@@ -285,7 +274,7 @@ export async function confirmAssetReceipt(id: number) {
     const siblings = await prisma.assetReceiptLine.findMany({ where: { sourceInventoryLineId: srcId }, select: { id: true, quantity: true } });
     amounts.set(l.id, allocateByQuantity(total, src.quantity, siblings, dec).get(l.id)!);
   }
-  if (problems.length) bulkFail("همه‌ی ردیف‌های رسید باید بها داشته باشند؛ تایید انجام نشد", problems);
+  if (problems.length) assetBulkFail("همه‌ی ردیف‌های رسید باید بها داشته باشند؛ تایید انجام نشد", problems);
   await prisma.$transaction(async (tx) => {
     const claimed = await tx.assetReceipt.updateMany({ where: { id, status: "REGISTERED" }, data: { status: "FINALIZED", finalizedAt: new Date() } });
     if (!claimed.count) fail("این رسید قبلاً تایید شده است");
@@ -374,14 +363,11 @@ async function checkPosition(p: DefineInput["position"]) {
   return { costCenterId: Number(p!.costCenterId), projectId, locationId };
 }
 
-/** مثل generateDetailCode ولی روی همان تراکنش: کدهای پلاک‌های هم‌دسته که هنوز commit نشده‌اند دیده می‌شوند (زیر قفل ۷۱۰۰۰۶۱) */
-async function nextAssetCode(tx: Pick<typeof prisma, "detailType" | "detailCodeUsage">) {
-  const dt = await tx.detailType.findUnique({ where: { code: DETAIL_TYPE_FIXED_ASSET } });
-  if (!dt) return fail("نوع تفصیل «دارایی ثابت» تعریف نشده است");
-  const last = await tx.detailCodeUsage.findFirst({ where: { detailTypeId: dt!.id }, orderBy: { code: "desc" } });
-  const next = last ? parseInt(last.code, 10) + 1 : dt!.startNumber;
-  if (next > dt!.endNumber) fail(`ظرفیت کدگذاری برای نوع تفصیل «${dt!.title}» تمام شده است`);
-  return { code: String(next).padStart(dt!.codeLength, "0"), detailTypeId: dt!.id };
+/** کد پلاک: عدد ۶ رقمی ترتیبی (آخرین کد + ۱، شروع ۱۰۰۰۰۱)؛ کد تفصیلی نیست و هیچ نوع تفصیلی ندارد. زیر قفل ۷۱۰۰۰۶۱ صدا زده می‌شود تا پلاک‌های هم‌دسته کد متمایز بگیرند */
+async function nextAssetCode(tx: Pick<typeof prisma, "fixedAsset">) {
+  const last = await tx.fixedAsset.findFirst({ orderBy: { detailCode: "desc" }, select: { detailCode: true } });
+  const next = Math.max(100001, last ? parseInt(last.detailCode, 10) + 1 : 100001);
+  return { code: String(next).padStart(6, "0") };
 }
 
 export async function defineAssets(body: DefineInput, opts: { allowManual: boolean; tx?: any }) {
@@ -395,7 +381,7 @@ export async function defineAssets(body: DefineInput, opts: { allowManual: boole
   if (!comps.length) fail("حداقل یک جزء (ردیف رسید یا بهای دستی) لازم است");
   const opening = blank(body.openingAccumulatedDepreciation) ? null : D(body.openingAccumulatedDepreciation);
   if (opening && opening.isNeg()) fail("استهلاک انباشته‌ی افتتاحیه نمی‌تواند منفی باشد");
-  const dec = await baseDecimals();
+  const dec = await getBaseCurrencyDecimals();
   const count = Math.max(1, Math.min(500, Math.floor(Number(body.count ?? 1)) || 1));
   const manual = comps.every((c) => !c.receiptLineId);
   if (!manual && comps.some((c) => !c.receiptLineId)) fail("ردیف رسید و بهای دستی را نمی‌توان با هم ترکیب کرد");
@@ -449,7 +435,7 @@ export async function defineAssets(body: DefineInput, opts: { allowManual: boole
       if (!defaultTitle) fail("عنوان دارایی الزامی است");
       if (inServiceDate < acquisitionDate!) fail("تاریخ بهره‌برداری نمی‌تواند قبل از تاریخ تحصیل باشد");
 
-      const { code, detailTypeId } = await nextAssetCode(tx);
+      const { code } = await nextAssetCode(tx);
       const asset = await tx.fixedAsset.create({
         data: {
           detailCode: code,
@@ -464,7 +450,6 @@ export async function defineAssets(body: DefineInput, opts: { allowManual: boole
           positions: { create: { fromDate: inServiceDate, costCenterId: pos.costCenterId, projectId: pos.projectId, locationId: pos.locationId } },
         },
       });
-      await tx.detailCodeUsage.create({ data: { code, detailTypeId, entityTable: "FixedAsset", entityId: asset.id } });
       created.push(asset);
     }
     return created;
@@ -514,7 +499,7 @@ export async function createAssetsFromReceipt(
         problems.push({ ...row, "علت": e.message });
       }
     }
-    if (problems.length) bulkFail("ایجاد دارایی انجام نشد", problems);
+    if (problems.length) assetBulkFail("ایجاد دارایی انجام نشد", problems);
   });
   return { created: total, leftovers };
 }
@@ -551,7 +536,6 @@ export async function deleteAsset(id: number) {
   if (!a) return fail("دارایی یافت نشد");
   if (a.confirmedAt) fail("دارایی تاییدشده قابل حذف نیست؛ ابتدا تایید آن را برگردانید");
   await prisma.$transaction([
-    prisma.detailCodeUsage.deleteMany({ where: { entityTable: "FixedAsset", entityId: id } }),
     prisma.fixedAsset.delete({ where: { id } }),
   ]);
 }
@@ -565,7 +549,7 @@ export async function deleteAsset(id: number) {
 export async function confirmAssets(idsIn: number[], userId: number | null) {
   const ids = Array.from(new Set(idsIn.map(Number).filter(Number.isFinite)));
   if (!ids.length) fail("دارایی‌ای انتخاب نشده است");
-  const dec = await baseDecimals();
+  const dec = await getBaseCurrencyDecimals();
   const calcEnd = await lastCalculatedEnd();
   const assets = await prisma.fixedAsset.findMany({
     where: { id: { in: ids } },
@@ -619,7 +603,7 @@ export async function confirmAssets(idsIn: number[], userId: number | null) {
     else if (a.salvageValue.gte(cost)) bad(`ارزش اسقاط باید کمتر از بهای دارایی (${cost.toString()}) باشد`);
     else writes.push({ assetId: a.id, cost, comps });
   }
-  if (problems.length) bulkFail("تایید دارایی انجام نشد", problems);
+  if (problems.length) assetBulkFail("تایید دارایی انجام نشد", problems);
 
   await prisma.$transaction(async (tx) => {
     for (const w of writes) {
@@ -643,7 +627,7 @@ export async function unconfirmAssets(idsIn: number[]) {
     else if (a.acquisitionJournalEntryId) problems.push({ "پلاک": a.detailCode, "عنوان": a.title, "علت": "سند حسابداری تحصیل دارد؛ ابتدا سند را حذف کنید" });
     else if (await prisma.assetDepreciationItem.findFirst({ where: { assetId: a.id }, select: { id: true } })) problems.push({ "پلاک": a.detailCode, "عنوان": a.title, "علت": "برای این پلاک استهلاک محاسبه شده است" });
   }
-  if (problems.length) bulkFail("برگشت از تایید انجام نشد", problems);
+  if (problems.length) assetBulkFail("برگشت از تایید انجام نشد", problems);
   await prisma.$transaction([
     prisma.fixedAssetComponent.updateMany({ where: { assetId: { in: ids }, receiptLineId: { not: null } }, data: { amount: null } }),
     prisma.fixedAsset.updateMany({ where: { id: { in: ids } }, data: { cost: null, confirmedAt: null, confirmedById: null } }),

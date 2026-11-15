@@ -16,7 +16,7 @@ export const requestTypeKey = (id: number) => `RQ${id}`;
 export const leaveRequestKey = (id: number) => `RL${id}`;
 
 export const NATURE_FA = { LEAVE: "مرخصی", MISSION: "ماموریت" } as const;
-export const UNIT_FA = { DAILY: "روزانه", HOURLY: "ساعتی" } as const;
+const UNIT_FA = { DAILY: "روزانه", HOURLY: "ساعتی" } as const;
 
 export function requestTypeShape(t: any) {
   const missionTypes = (t.missionTypes ?? []) as { isActive: boolean }[];
@@ -84,7 +84,7 @@ export async function saveRequestType(body: any, id?: number) {
 }
 
 /** عامل‌هایی که فرمولشان به متغیر این نوع درخواست (RQ/RL) ارجاع می‌دهند */
-export async function factorsUsingRequestType(id: number): Promise<string[]> {
+async function factorsUsingRequestType(id: number): Promise<string[]> {
   const re = new RegExp(`\\[(V|T):(${requestTypeKey(id)}|${leaveRequestKey(id)})(:[A-Za-z_]+)?\\]`, "i");
   return formulaUsers(re);
 }

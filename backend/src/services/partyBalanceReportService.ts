@@ -2,6 +2,7 @@ import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { PartyBalanceRole, ROLE_TITLE, ROLES, Movement, MovementPart, MOVEMENT_PARTS, movementTotals, openingMovements } from "./partyBalanceService";
 import { listRoleParties } from "./partyBalanceOpeningService";
+import { parseIsoDay } from "../utils/inputParse";
 
 // =========================================================================
 // «مانده مشتریان / تامین‌کنندگان / طرف‌حساب‌ها» — گزارش مانده‌ی عملیاتی (نه از سند حسابداری؛ منبع: services/partyBalanceService.ts#movementTotals).
@@ -78,11 +79,7 @@ export interface GroupRow {
   closing: number;
 }
 
-const toDate = (s: string, label: string) => {
-  const d = new Date(`${s.slice(0, 10)}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) throw new Error(`${label} نامعتبر است`);
-  return d;
-};
+const toDate = (s: string, label: string): Date => parseIsoDay(s, label) as Date;
 const dayBefore = (d: Date) => new Date(d.getTime() - 86400000);
 
 export async function partyBalanceReport(scope: ReportScope, q: ReportQuery) {

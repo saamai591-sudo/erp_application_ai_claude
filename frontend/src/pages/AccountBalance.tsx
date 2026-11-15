@@ -11,6 +11,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
 import { useDetailLevels } from "../lib/useDetailLevels";
 import { usePersistedState } from "../lib/usePersistedState";
+import { JOURNAL_STATUS_FA } from "../lib/enumLabels";
 
 // «تراز حسابها» (حسابداری › گزارش؛ مستند Documents/گزارش تراز حسابها.docx): نوع گزارش (تراز / تحلیلی)، سطح، فرمت چاپ (۲/۴/۶ ستونی)،
 // نوع سند و گزینه‌ی انتخاب اسناد. کلید «تایید» گزارش را در قالب چاپ (سرور می‌سازد) نمایش می‌دهد.
@@ -20,7 +21,6 @@ interface DocType { id: number; title: string; systemKey?: string | null }
 interface AccountRow { id: number; code: string; title: string; level: string; levelOrder: number }
 interface EntryRow { id: number; number: number; referenceNumber: number; date: string; status: string; description: string | null; documentType: string }
 
-const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
 type Kind = "TRIAL" | "ANALYTIC";
 type DocMode = "ALL" | "INCLUDE" | "EXCLUDE";
 
@@ -122,7 +122,7 @@ export default function AccountBalance() {
     { header: "شماره عطف", render: (r) => toFaDigits(String(r.referenceNumber)), filterValue: (r) => String(r.referenceNumber), width: "90px" },
     { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterValue: (r) => formatJalaliDate(r.date), width: "100px" },
     { header: "نوع سند", render: (r) => r.documentType, filterValue: (r) => r.documentType },
-    { header: "وضعیت", render: (r) => STATUS_FA[r.status] ?? r.status, filterValue: (r) => STATUS_FA[r.status] ?? r.status, width: "70px" },
+    { header: "وضعیت", render: (r) => JOURNAL_STATUS_FA[r.status] ?? r.status, filterValue: (r) => JOURNAL_STATUS_FA[r.status] ?? r.status, width: "70px" },
     { header: "شرح", render: (r) => r.description ?? "", filterValue: (r) => r.description ?? "" },
   ];
 

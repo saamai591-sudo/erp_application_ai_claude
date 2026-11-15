@@ -18,7 +18,8 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
-import { partyDisplayName } from "./Users";
+import { partyDisplayName } from "../lib/partyDisplay";
+
 
 // «برگشت خرید» (زنجیره تامین › عملیات): سند مالیِ برگشت از فاکتور خرید؛ فقط بر مبنای ردیف‌های «برگشت به تامین‌کننده»ی انبار که رسیدشان فاکتور خرید دارد.
 // مبلغ‌ها قفل‌اند و از ردیف فاکتور خریدِ همان رسید می‌آیند (بک‌اند: routes/purchaseReturns.ts)؛ این صفحه فقط نمایش می‌دهد.

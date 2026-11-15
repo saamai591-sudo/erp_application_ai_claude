@@ -20,6 +20,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
 import { useTabs } from "../lib/TabsContext";
 import { fetchSelectedFiscalPeriod, defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { PlusIcon } from "../components/icons";
 
 // «عملیات ضمانت‌نامه دریافتی/پرداختی» (مدیریت خزانه › تضامین): تقلیل، افزایش و ابطالِ ضمانت‌نامه. هر سند یک نوع عملیات دارد؛ مبلغ فعلی
 // ضمانت‌نامه از روی سند اصلی + تمدیدها و عملیات‌ها محاسبه می‌شود (سرور). سند حسابداری = برگشت/تکرارِ سند دریافت/پرداخت اصلی با مبلغ عملیات.
@@ -45,14 +46,6 @@ interface Row {
 }
 interface Pickable { id: number; documentNumber: number; number: string; guaranteeTypeTitle: string; currencyTitle: string; amount: number; dueDate: string | null }
 interface ListRow { id: number; number: number; date: string; kind: Kind; partyTitle: string; description: string; instrumentCount: number; totalChange: number }
-
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 export default function GuaranteeOperations({ direction }: { direction: Direction }) {
   const location = useLocation();

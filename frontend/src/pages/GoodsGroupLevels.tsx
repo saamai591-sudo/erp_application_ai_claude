@@ -36,7 +36,6 @@ function LevelList() {
   const cacheKey = "/goods-group-levels";
   const [items, setItems] = usePersistedState<GoodsGroupLevel[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/goods-group-levels").then(setItems).catch((e) => setError(e.message));

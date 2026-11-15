@@ -45,7 +45,6 @@ function SalesCenterList() {
   const cacheKey = "/sales-centers";
   const [items, setItems] = usePersistedState<SalesCenter[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/sales-centers").then(setItems).catch((e) => setError(e.message));

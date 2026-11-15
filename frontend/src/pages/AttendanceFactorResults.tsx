@@ -93,7 +93,7 @@ export default function AttendanceFactorResults() {
   const [tab, setTab] = usePersistedState(`${key}:tab`, "month");
   const [data, setData] = usePersistedState<Result | null>(key, null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [detail, setDetail] = useState<{ title: string; vars?: Record<string, number>; values: Record<string, Val> } | null>(null);
   // کارمندان قابل انتخاب: انتسابِ شیفت تا پایان بازه‌ی تردد ماه انتخابی
   const [employees, setEmployees] = useState<{ id: number; personnelCode: string; fullName: string }[]>([]);

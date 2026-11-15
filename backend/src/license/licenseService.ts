@@ -28,7 +28,7 @@ export interface BindingMatch {
   reasons: string[];
 }
 
-export function matchBinding(binding: LicenseBinding, fp: Fingerprint): BindingMatch {
+function matchBinding(binding: LicenseBinding, fp: Fingerprint): BindingMatch {
   const rows: MatchRow[] = [
     { key: "databaseName", label: "نام دیتابیس", licensed: binding.databaseName, current: fp.databaseName, ok: !!fp.databaseName && binding.databaseName === fp.databaseName },
     { key: "databaseSystemId", label: "شناسه‌ی دیتابیس", licensed: binding.databaseSystemId, current: fp.databaseSystemId, ok: !!fp.databaseSystemId && binding.databaseSystemId === fp.databaseSystemId },
@@ -207,7 +207,7 @@ export function isEnforcementEnabled(): boolean {
 const CACHE_MS = 30_000;
 let cached: { at: number; status: LicenseStatus } | null = null;
 
-export function invalidateLicenseCache(): void {
+function invalidateLicenseCache(): void {
   cached = null;
 }
 
@@ -242,7 +242,7 @@ export async function checkLicenseGate(): Promise<GateResult> {
 // ── ماژول‌ها و قابلیت‌های فعال ───────────────────────────────────────────────────────────────────────────────────────────────────────
 // ماژول‌های پایه همیشه روشن‌اند؛ بقیه فقط اگر در لایسنس باشند. modules/features = null یعنی «همه» (قفل خاموش، ساخت بدون کلید، لایسنس نبودن
 // [در آن حالت دروازه‌ی قفل جلوی همه‌چیز را می‌گیرد] یا لایسنسِ بدون محدودیت). داده‌ی ماژول خاموش‌شده در جدول‌ها می‌ماند؛ فقط دسترسی/منو بسته می‌شود.
-export const CORE_MODULES = ["settings", "master-data", "accounting", "workflow"];
+const CORE_MODULES = ["settings", "master-data", "accounting", "workflow"];
 
 export interface Entitlements {
   enforced: boolean;

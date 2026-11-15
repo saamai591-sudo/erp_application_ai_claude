@@ -1,7 +1,8 @@
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { getLineAmounts } from "./documentItemAmountService";
-import { CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
+import { CARRY_FORWARD_OPENING_WHERE, VALUED_OUTBOUND_DOC_TYPES } from "./warehouseStockService";
+import { DOC_TYPE_FA } from "../data/warehouseDocTypes";
 
 /**
  * سرویس مرکزیِ نرمال‌سازیِ «گردش انبار» برای گزارش «مرور موجودی انبار» (مرور تعدادی/مبلغی).
@@ -69,40 +70,8 @@ export interface MovementFilters {
   physicalLocations?: string[];
 }
 
-const DOC_TYPE_FA: Record<string, string> = {
-  INITIAL_INVENTORY: "موجودی اول دوره",
-  WAREHOUSE_RECEIPT: "رسید انبار خرید",
-  WAREHOUSE_TRANSFER_OUT: "حواله انتقالی",
-  WAREHOUSE_TRANSFER_IN: "رسید انتقال",
-  WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
-  SALES_DELIVERY: "حواله فروش",
-  SALES_RETURN: "برگشت از فروش",
-  STORE_SALE_ISSUE: "حواله فروش فروشگاهی",
-  STORE_SALE_RETURN: "برگشت حواله فروش فروشگاهی",
-  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
-  PRODUCTION_RECEIPT: "رسید تولید",
-  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
-  PROJECT_CONSUMPTION: "مصرف پروژه",
-  PRODUCTION_CONSUMPTION: "مصرف تولید",
-  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
-  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
-  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
-  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
-  INVENTORY_COUNTING_SHORTAGE: "کسری انبارگردانی",
-};
-
-// دقیقاً همان جهت‌ها/علائم warehouseStockService.SIGNED_TYPES — صادره یعنی OUT
-export const OUTBOUND_DOC_TYPES = new Set([
-  "SALES_DELIVERY",
-  "STORE_SALE_ISSUE",
-  "CENTER_CONSUMPTION",
-  "PROJECT_CONSUMPTION",
-  "PRODUCTION_CONSUMPTION",
-  "SUPPLIER_RETURN",
-  "FIXED_ASSET_ISSUE",
-  "WAREHOUSE_TRANSFER_OUT",
-  "INVENTORY_COUNTING_SHORTAGE",
-]);
+// صادره یعنی OUT — مشتق از warehouseStockService.SIGNED_TYPES (منبع حقیقتِ جهت)
+export const OUTBOUND_DOC_TYPES = VALUED_OUTBOUND_DOC_TYPES;
 
 function lineTrackingWhere(f: MovementFilters) {
   const where: any = {};

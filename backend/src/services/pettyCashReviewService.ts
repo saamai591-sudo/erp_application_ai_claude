@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // منبع داده‌ی گزارش «مرور تنخواه» (خزانه‌داری > گزارش). هر «گردش تنخواه» یک ورودی (شارژ) یا خروجی (پرداخت) روی یک تنخواه‌دار
@@ -42,11 +43,6 @@ export interface CustodianMeta {
   pettyCashId: number;
 }
 
-export function partyDisplay(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 export async function loadPettyCashes(): Promise<Map<number, PettyCashMeta>> {
   const items = await prisma.pettyCash.findMany({ include: { currency: true } });
   return new Map(items.map((p: any) => [p.id, { id: p.id, code: p.detailCode, title: p.title, currencyTitle: p.currency?.title || "" }]));
@@ -54,7 +50,7 @@ export async function loadPettyCashes(): Promise<Map<number, PettyCashMeta>> {
 
 export async function loadCustodians(): Promise<Map<number, CustodianMeta>> {
   const items = await prisma.pettyCashCustodian.findMany({ include: { party: true } });
-  return new Map(items.map((c: any) => [c.id, { id: c.id, code: c.detailCode, title: partyDisplay(c.party), pettyCashId: c.pettyCashId }]));
+  return new Map(items.map((c: any) => [c.id, { id: c.id, code: c.detailCode, title: partyTitle(c.party), pettyCashId: c.pettyCashId }]));
 }
 
 export interface PettyCashOpeningRef {
@@ -138,7 +134,7 @@ export async function getPettyCashMovements(toDate: Date, opts: { openingsBefore
         docTypeCode: "FUNDING",
         docId: l.paymentId,
         docNumber: l.payment.number,
-        partyDisplay: partyDisplay(l.payment.party),
+        partyDisplay: partyTitle(l.payment.party),
         description: l.description || l.payment.description,
         inflow: Number(l.amount),
         outflow: 0,
@@ -158,7 +154,7 @@ export async function getPettyCashMovements(toDate: Date, opts: { openingsBefore
         docTypeCode: "SPENDING",
         docId: p.id,
         docNumber: p.id,
-        partyDisplay: partyDisplay(p.party),
+        partyDisplay: partyTitle(p.party),
         description: p.description,
         inflow: 0,
         outflow: Number(p.amount),

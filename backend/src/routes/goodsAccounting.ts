@@ -5,6 +5,8 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { goodsSettingIdsInUse, goodsSettingUsageMessage } from "../services/settingUsageService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { OUTBOUND_DOC_TYPES } from "../services/warehouseMovementService";
+import { VALUED_INBOUND_DOC_TYPES } from "../services/warehouseStockService";
 
 const ACCOUNTING_GROUPS = findFormPrefix("accounting-groups");
 const GOODS_SERVICE_ACCOUNTING = findFormPrefix("goods-service-accounting");
@@ -80,7 +82,7 @@ const INVENTORY_TYPES = new Set(["INVENTORY"]);
 // طبق تصمیم صریح کاربر: این دو نوع حساب دیگر بر اساس «گروه حسابداری» تفکیک نمی‌شوند — فقط بر اساس نوع
 // فروش/نوع خرید. «گروه حسابداری» برایشان کاملاً حذف شده (نه فقط اختیاری) — همیشه null ذخیره می‌شود،
 // حتی اگر کلاینت مقداری برایش بفرستد؛ در عوض نوع فروش/نوع خرید برایشان الزامی است.
-const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE", "SERVICE_PURCHASE"]);
+const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE", "SERVICE_PURCHASE", "PRODUCTION_WIP"]);
 
 // «خرید خدمت»: معین بدهکار فاکتور خرید خدمات به‌ازای هر خدمت (نه گروه حسابداری/نوع خرید)؛ فقط برای خدمتِ دارای نحوه حسابداری «هزینه».
 // خدمتِ «بهای موجودی» معین خرید جداگانه ندارد (بدهکارش از معین موجودی رسید انبار می‌آید — routes/servicePurchaseInvoices.ts).
@@ -95,33 +97,10 @@ async function assertValidServicePurchaseService(serviceId: number | null | unde
 
 // انواع سند انبار مجاز برای هر نوع حساب — دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES:
 // «بستانکار رسید انبار» یعنی اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
-const WAREHOUSE_RECEIPT_DOC_TYPES = new Set([
-  "INITIAL_INVENTORY",
-  "WAREHOUSE_RECEIPT",
-  "WAREHOUSE_TRANSFER_IN",
-  "WAREHOUSE_ADJUSTMENT",
-  "SALES_RETURN",
-  "STORE_SALE_RETURN",
-  "PRODUCTION_RECEIPT",
-  "CENTER_CONSUMPTION_RETURN",
-  "PROJECT_CONSUMPTION_RETURN",
-  "PRODUCTION_CONSUMPTION_RETURN",
-]);
-const WAREHOUSE_ISSUE_DOC_TYPES = new Set([
-  "SALES_DELIVERY",
-  "STORE_SALE_ISSUE",
-  "CENTER_CONSUMPTION",
-  "PROJECT_CONSUMPTION",
-  "PRODUCTION_CONSUMPTION",
-  "SUPPLIER_RETURN",
-  "FIXED_ASSET_ISSUE",
-  "WAREHOUSE_TRANSFER_OUT",
-  "INVENTORY_COUNTING_SHORTAGE",
-]);
 function validWarehouseDocType(accountType: string, warehouseDocType?: string | null): boolean {
   if (!warehouseDocType) return true;
-  if (accountType === "WAREHOUSE_RECEIPT_CREDIT") return WAREHOUSE_RECEIPT_DOC_TYPES.has(warehouseDocType);
-  if (accountType === "WAREHOUSE_ISSUE_DEBIT") return WAREHOUSE_ISSUE_DOC_TYPES.has(warehouseDocType);
+  if (accountType === "WAREHOUSE_RECEIPT_CREDIT") return VALUED_INBOUND_DOC_TYPES.has(warehouseDocType);
+  if (accountType === "WAREHOUSE_ISSUE_DEBIT") return OUTBOUND_DOC_TYPES.has(warehouseDocType);
   return false;
 }
 

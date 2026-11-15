@@ -17,9 +17,10 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { BankAccountPicker } from "../components/BankAccountPicker";
-import { partyDisplayName } from "./Users";
+
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod } from "../lib/fiscalYearDefaultDate";
 import { GuaranteeOpeningTab, GuaRow, guaRowFromServer, guaRowsToPayload } from "../components/GuaranteeOpeningTab";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 // ماژول «خزانه‌داری» > افتتاحیه دریافت و پرداخت — طبق Documents/افتتاحیه دریافت و پرداخت و بستن سال.md. به‌ازای هر دوره‌ی
 // مالی یک فرم با چهار تب: چک‌های دریافتی، چک‌های پرداختی، حساب‌های بانکی، صندوق‌ها (نگاه کنید به
@@ -124,7 +125,6 @@ function OpeningList() {
   const cacheKey = "/treasury-openings";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
   // امکان ایجاد افتتاحیه‌ی دستی (سمت سرور هم اعمال می‌شود): فقط یکی در کل سیستم، و فقط وقتی هیچ افتتاحیه‌ی سیستمی وجود ندارد
   const [creation, setCreation] = useState<{ canCreate: boolean; reason: string | null }>({ canCreate: true, reason: null });
 

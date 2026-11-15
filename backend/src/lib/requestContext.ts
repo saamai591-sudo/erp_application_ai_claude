@@ -17,6 +17,8 @@ interface RequestContext {
     deleteBlocked?: { header: string; message: string; groups: unknown[] };
     /** ردیف‌های لاگ تغییرات این درخواست؛ فقط وقتی پاسخ موفق بود نوشته می‌شوند (middleware/fiscalScope.ts). نبودنش = نوشتن فوری (کارهای زمان‌بندی‌شده/اسکریپت) */
     auditBuffer?: import("../services/auditService").AuditRow[];
+    /** تفاوت ردیف‌های فرزند (مثل ردیف‌های سند حسابداری) که مسیر ویرایش پیش از نوشتن ثبت می‌کند؛ auditChange آن را در همان ردیف لاگِ سند مادر ادغام می‌کند. کلید: «Model:id» ← نام ارتباط ← تفاوت */
+    auditRelationDiffs?: Map<string, Record<string, Record<string, [unknown, unknown]> | null>>;
   };
 }
 

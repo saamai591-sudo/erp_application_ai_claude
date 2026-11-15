@@ -16,7 +16,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 export type PurchaseRouteNature = "TENDER" | "INQUIRY" | "NO_FORMALITY" | "EXCLUSIVE";
 
-export const PURCHASE_ROUTE_NATURE_FA: Record<PurchaseRouteNature, string> = {
+const PURCHASE_ROUTE_NATURE_FA: Record<PurchaseRouteNature, string> = {
   TENDER: "مناقصه",
   INQUIRY: "استعلام",
   NO_FORMALITY: "بدون تشریفات",
@@ -46,7 +46,6 @@ function PurchaseRouteList() {
   const cacheKey = "/purchase-routes";
   const [items, setItems] = usePersistedState<PurchaseRoute[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/purchase-routes").then(setItems).catch((e) => setError(e.message));

@@ -274,7 +274,6 @@ router.put("/goods-groups/:id", can(`${GOODS_GROUPS}.edit`), async (req, res) =>
   let isLastBranch = forcedLastBranch ? true : body.isLastBranch ?? group.isLastBranch;
 
   // در صورتی که در تب ویژگی ردیفی انتخاب شده باشد (چه از قبل ذخیره شده، چه در همین درخواست)، تغییر این فیلد به «خیر» مجاز نیست
-  const willHaveAttributes = (body.attributes && body.attributes.length > 0) || (body.attributes === undefined && group.attributes.length > 0);
   if (!forcedLastBranch && group.isLastBranch && !isLastBranch && group.attributes.length > 0) {
     return res.status(400).json({ error: "چون در تب ویژگی ردیفی انتخاب شده، امکان تغییر «آخرین شاخه هست» به خیر وجود ندارد" });
   }

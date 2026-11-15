@@ -48,13 +48,13 @@ function decrypt(box, pass) {
 export const publicKeyB64 = (privateKey) => createPublicKey(privateKey).export({ type: "spki", format: "der" }).toString("base64");
 
 export async function loadPrivateKey(file = process.env.ERP_RELEASE_KEY_FILE || DEFAULT_KEY_FILE) {
-  if (!existsSync(file)) throw new Error(`فایل کلید امضا پیدا نشد: ${file}\nیک بار «node scripts/release-sign.mjs keygen» را اجرا کنید.`);
+  if (!existsSync(file)) throw new Error(`Signing key file not found: ${file}\nRun "node scripts/release-sign.mjs keygen" once.`);
   const box = JSON.parse(readFileSync(file, "utf8"));
-  const pass = await askHidden("گذرواژه‌ی کلید امضای نسخه: ");
+  const pass = await askHidden("Release signing key password: ");
   try {
     return createPrivateKey(decrypt(box, pass));
   } catch {
-    throw new Error("گذرواژه‌ی کلید امضا اشتباه است");
+    throw new Error("Wrong signing key password");
   }
 }
 
@@ -70,21 +70,21 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const file = resolve(opt(cmd === "keygen" ? "--out" : "--key", DEFAULT_KEY_FILE));
   if (cmd === "keygen") {
     if (existsSync(file)) {
-      console.error(`✗ ${file} از قبل هست؛ برای جلوگیری از گم‌شدن کلید قبلی چیزی نوشته نشد.`);
+      console.error(`✗ ${file} already exists; nothing was written so the previous key is not lost.`);
       process.exit(1);
     }
-    const pass = await askHidden("گذرواژه‌ی جدید برای کلید امضا: ");
+    const pass = await askHidden("New password for the signing key: ");
     if (pass.length < 8) {
-      console.error("✗ گذرواژه حداقل ۸ نویسه باشد");
+      console.error("✗ Password must be at least 8 characters");
       process.exit(1);
     }
     const { privateKey } = generateKeyPairSync("ed25519");
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify(encrypt(privateKey.export({ type: "pkcs8", format: "pem" }).toString(), pass)), { mode: 0o600 });
-    console.log(`✓ کلید خصوصی رمزشده: ${file}\n  (از آن یک نسخه‌ی پشتیبان امن بگیرید؛ با گم‌شدنش دیگر نمی‌توان نسخه‌ی قابل‌نصب امضا کرد)\n\nکلید عمومی (برای RELEASE_PUBLIC_KEY_B64):\n${publicKeyB64(privateKey)}`);
+    console.log(`✓ Encrypted private key: ${file}\n  (keep a safe backup; if it is lost, installable releases can no longer be signed)\n\nPublic key (for RELEASE_PUBLIC_KEY_B64):\n${publicKeyB64(privateKey)}`);
   } else if (cmd === "pubkey") {
     console.log(publicKeyB64(await loadPrivateKey(file)));
   } else {
-    console.log("استفاده: node scripts/release-sign.mjs keygen|pubkey");
+    console.log("Usage: node scripts/release-sign.mjs keygen|pubkey");
   }
 }

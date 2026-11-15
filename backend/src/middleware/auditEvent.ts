@@ -21,8 +21,3 @@ export function auditRoute(action: string, describe?: (req: Request) => string |
   };
 }
 
-/** ورودی‌های ساده‌ی بدنه‌ی درخواست را برای توضیح رویداد می‌خواند (تاریخ، نوع، …) */
-export const bodyPick = (...keys: string[]) => (req: Request): string | null => {
-  const parts = keys.filter((k) => req.body?.[k] !== undefined && req.body?.[k] !== null && req.body?.[k] !== "").map((k) => `${k}=${String(req.body[k]).slice(0, 60)}`);
-  return `${req.method} ${req.originalUrl.split("?")[0]}${parts.length ? " — " + parts.join("، ") : ""}`;
-};

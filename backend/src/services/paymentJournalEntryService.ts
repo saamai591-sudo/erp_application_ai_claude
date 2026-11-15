@@ -6,8 +6,10 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { EffectiveTreasurySettings, markTreasurySettingsUsed } from "./treasurySettingService";
-import { autoSlotRefreshPatch } from "./accountingLineDims";
+import { autoSlotRefreshPatch, detailSourcesOf } from "./accountingLineDims";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // سند حسابداری «پرداخت / اعلامیه پرداخت» (Payment) — هم‌الگوی receiptJournalEntryService.ts با جهت‌های معکوس، در دو مرحله:
@@ -29,11 +31,6 @@ import { findIssuingDocType } from "./documentTypeService";
 // =========================================================================
 
 const FX_TOLERANCE = 0.0001;
-
-function partyDisplayName(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
 
 type AccountRef = { id: number; title: string; code?: string; isCurrency: boolean; detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null };
 type Dims = { detail1Code?: string; detail2Code?: string; detail3Code?: string };
@@ -75,10 +72,9 @@ async function dimsFor(account: AccountRef, detailCode: string | null): Promise<
   return resolveAccountDetailFields(account, typeId, detailCode);
 }
 
-export async function buildPaymentPlan(payment: any, treasurySettings: EffectiveTreasurySettings, descriptionOverride?: string) {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-  const description = descriptionOverride ?? `بابت اعلامیه پرداخت ${payment.number} ${formatJalaliDateForMessage(payment.date)} ${partyDisplayName(payment.party)}`.trim();
+async function buildPaymentPlan(payment: any, treasurySettings: EffectiveTreasurySettings, descriptionOverride?: string) {
+  const baseCurrency = await getBaseCurrency();
+  const description = descriptionOverride ?? `بابت اعلامیه پرداخت ${payment.number} ${formatJalaliDateForMessage(payment.date)} ${partyTitle(payment.party)}`.trim();
   const errors: string[] = [];
   const plan: PlannedPaymentLine[] = [];
 
@@ -254,12 +250,6 @@ async function loadPaymentForPlan(sc: PScope): Promise<any> {
 
 const newTreasurySettings = async () => new EffectiveTreasurySettings((await prisma.treasuryAccountSetting.findMany({ include: { account: true } })) as any[]);
 
-const sourcesOf = (d: { detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }) => ({
-  detail1Source: d.detail1Code ? "AUTO" : "MANUAL",
-  detail2Source: d.detail2Code ? "AUTO" : "MANUAL",
-  detail3Source: d.detail3Code ? "AUTO" : "MANUAL",
-}) as { detail1Source: "AUTO" | "MANUAL"; detail2Source: "AUTO" | "MANUAL"; detail3Source: "AUTO" | "MANUAL" };
-
 const keyOf = (r: { role: string; instrumentLineId?: number | null; settlementLineId?: number | null }) => `${r.role}:${r.instrumentLineId ?? ""}:${r.settlementLineId ?? ""}`;
 
 /** تفصیل‌های خودکار هر ردیفِ طرح: فقط تفصیل پایه‌ی خود ابزار/موضوع (صندوق، حساب بانکی، طرف حساب، تنخواه‌دار)؛ بقیه‌ی سطح‌ها را حسابدار پر می‌کند */
@@ -294,9 +284,9 @@ export async function syncPaymentAccountingLines(ref: PaymentRef) {
       const cur = byKey.get(key);
       const refs = { treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null };
       if (!cur) {
-        await tx.paymentAccountingLine.create({ data: { ...owner, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, ...refs, ...detailsOf(dims), ...sourcesOf(dims) } });
+        await tx.paymentAccountingLine.create({ data: { ...owner, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, ...refs, ...detailsOf(dims), ...detailSourcesOf(dims) } });
       } else if (cur.accountId !== p.account.id) {
-        await tx.paymentAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, ...refs, ...detailsOf(dims), ...sourcesOf(dims) } });
+        await tx.paymentAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, ...refs, ...detailsOf(dims), ...detailSourcesOf(dims) } });
       } else {
         // همان معین: ارجاع تنظیم مؤثر به‌روز می‌شود و سطح‌های تفصیلِ «خودکار» با مقدار فعلی ابزار/موضوع هم‌گام می‌شوند؛ سطح‌های «دستی» دست‌نخورده
         const patch = autoSlotRefreshPatch(cur as any, dims);

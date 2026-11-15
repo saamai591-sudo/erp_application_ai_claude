@@ -20,6 +20,8 @@ import { useAuth } from "../lib/AuthContext";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { DescriptionField } from "../components/DescriptionField";
+import { CheckIcon, UndoIcon, PlusIcon, LoadIcon } from "../components/icons";
+import { partyTitleOf } from "../lib/partyDisplay";
 
 type Status = "DRAFT" | "APPROVED" | "REJECTED";
 
@@ -30,10 +32,6 @@ interface ServiceOption { id: number; fullCode: string; title: string; kind: str
 
 interface PlanningStage2Row { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number }
 interface PlanningDetail { id: number; neededDate: string | null; stage2Rows: PlanningStage2Row[] }
-
-function supplierTitle(s: SupplierOption): string {
-  return s.party.category === "LEGAL" ? s.party.name || "" : `${s.party.firstName || ""} ${s.party.lastName || ""}`.trim();
-}
 
 interface ListRow {
   id: number; number: number; date: string; purchasePlanningId: number; purchasePlanningNumber: number;
@@ -59,29 +57,10 @@ export default function PriceInquiries() {
   return <PriceInquiryList />;
 }
 
-function CheckIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
-}
-function LoadIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-
 function PriceInquiryList() {
   const cacheKey = "/price-inquiries";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     try {
@@ -375,12 +354,12 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
                 disabled={isDataLoaded || !header.purchasePlanningId}
                 displayValue={(() => {
                   const s = suppliers.find((x) => String(x.id) === header.supplierId);
-                  return s ? `${toFaDigits(String(s.code))} — ${supplierTitle(s)}` : "";
+                  return s ? `${toFaDigits(String(s.code))} — ${partyTitleOf(s)}` : "";
                 })()}
                 rows={suppliers}
                 columns={[
                   { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                  { header: "عنوان", render: (x) => supplierTitle(x), filterValue: (x) => supplierTitle(x) },
+                  { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
                 ]}
                 onSelect={(x) => setHeader({ ...header, supplierId: String(x.id) })}
               />

@@ -13,6 +13,7 @@ import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
+import { ProductionOrderField } from "../components/ProductionOrderField";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
@@ -21,6 +22,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
 
 // «برگشت مصرف تولید» — همان الگوی CenterConsumptionReturns.tsx (بدون طرف‌مقابل، چون مصرف تولید هم
 // طرف‌مقابل ندارد). طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو
@@ -36,7 +38,7 @@ interface PickableLine { id: number; sourceProductionConsumptionLineId: number; 
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
 interface DetailLine { id: number; sourceProductionConsumptionLineId: number; sourceNumber: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null; details?: DetailValueDto[] }
-interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
+interface Detail { id: number; number: number; date: string; productionOrderId?: number | null; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
 const INFO_TEXT = "ثبت برگشت مصرف تولید — هر ردیف باید به یک ردیف مصرف تولید قطعی‌شده ارجاع بدهد؛ مقدار برگشتی نمی‌تواند از باقیمانده‌ی قابل برگشت آن ردیف بیشتر باشد.";
@@ -50,10 +52,6 @@ export default function ProductionConsumptionReturns() {
   if (isNew) return <ProductionConsumptionReturnForm basePath={basePath} />;
   if (isEdit) return <ProductionConsumptionReturnForm basePath={basePath} editId={Number(id)} />;
   return <ProductionConsumptionReturnList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function ProductionConsumptionReturnList({ basePath }: { basePath: string }) {
@@ -128,16 +126,16 @@ function ProductionConsumptionReturnForm({ editId, basePath }: { editId?: number
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("PRODUCTION_CONSUMPTION_RETURN");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
-    { date: string; warehouseId: string; description: string; details: DetailValues },
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
+    { date: string; warehouseId: string; productionOrderId: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "production-consumption-returns",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", description: "", details: {} }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", productionOrderId: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), description: d.description || "", details: detailsToValues(d.details) }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), productionOrderId: d.productionOrderId ? String(d.productionOrderId) : "", description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: (d) =>
       d.lines.map((l) => ({
         sourceProductionConsumptionLineId: String(l.sourceProductionConsumptionLineId),
@@ -210,6 +208,7 @@ function ProductionConsumptionReturnForm({ editId, basePath }: { editId?: number
     return {
       date: header.date,
       warehouseId: Number(header.warehouseId),
+      productionOrderId: header.productionOrderId ? Number(header.productionOrderId) : null,
       description: header.description,
       details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
@@ -293,6 +292,7 @@ function ProductionConsumptionReturnForm({ editId, basePath }: { editId?: number
               <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={coreDisabled} />
             </div>
+            <ProductionOrderField value={header.productionOrderId} onChange={(id) => setHeader({ ...header, productionOrderId: id })} disabled={coreDisabled} />
             <DocDetailHeaderFields
               config={detailConfig}
               values={header.details}

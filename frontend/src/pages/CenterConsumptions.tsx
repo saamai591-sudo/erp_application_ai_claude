@@ -23,6 +23,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { CostCenterPickerField } from "../components/TypePickerFields";
+import { PlusIcon } from "../components/icons";
 
 // «مصرف مرکز هزینه» — طبق stockAnalysis.md بند ۳۴/۳۹، جایگزین حواله انبار عمومی قدیم (WAREHOUSE_ISSUE)
 // برای طرف‌مقابل «مرکز هزینه» است (نگاه کنید به یادداشت بالای backend/src/routes/centerConsumptions.ts).
@@ -64,10 +65,6 @@ export default function CenterConsumptions() {
   if (isNew) return <CenterConsumptionForm basePath={basePath} />;
   if (isEdit) return <CenterConsumptionForm basePath={basePath} editId={Number(id)} />;
   return <CenterConsumptionList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function CenterConsumptionList({ basePath }: { basePath: string }) {
@@ -166,7 +163,7 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
   const detailConfig = useDocDetailConfig("CENTER_CONSUMPTION");
 
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, setError, loaded, submit, remove } = useDocumentForm<
     { date: string; basis: Basis; warehouseId: string; costCenterId: string; description: string; details: DetailValues },
     RowState,
     Detail

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { candidatesForBasisType, pickableBasisDocuments, rowBasisTypeOf, BasisType, RowBasisType } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, pickableBasisDocuments, rowBasisTypeOf, BasisType, RowBasisType, BASIS_FIELD } from "../services/paymentBasisCandidates";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
@@ -16,13 +16,6 @@ import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashB
 //    تامین‌کننده (فاکتور/سفارش خرید) یا مشتری (فاکتور فروش) باشد، و تاریخ سند مبنا باید از تاریخ این پرداخت کوچکتر باشد.
 // کنترل مانده منفی: اگر تنخواه‌دارِ انتخاب‌شده controlNegativeBalance=true باشد، مانده‌ی جاریِ تنخواه (از صفر شروع
 // می‌شود، نه از سقف تنخواه — services/pettyCashBalanceService.ts) در هیچ لحظه‌ای از ترتیب زمانیِ تراکنش‌ها نباید منفی شود.
-
-const BASIS_FIELD: Record<Exclude<RowBasisType, "NONE">, "purchaseInvoiceId" | "servicePurchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
-  PURCHASE_INVOICE: "purchaseInvoiceId",
-  SERVICE_PURCHASE_INVOICE: "servicePurchaseInvoiceId",
-  SALES_INVOICE: "salesInvoiceId",
-  PURCHASE_ORDER: "purchaseOrderId",
-};
 
 const FORM = findFormPrefix("petty-cash-payments");
 const router = Router();

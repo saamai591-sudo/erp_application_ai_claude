@@ -5,6 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { AuthedRequest } from "../middleware/auth";
 import { findEffectivePriceListId, isPriceListUsed, loadItemPricing } from "../services/salesPriceService";
+import { parseDateOnlyUtc } from "../utils/inputParse";
 
 // فروش › تنظیمات › «اعلامیه قیمت فروش»: قیمت پایه‌ی کالا + پله‌های مقدار، برای مجموعه‌ای از (مرکز فروش × نوع فروش) و یک ارز.
 // - حوزه‌ی «ایستگاه فروش» (فروش فروشگاهی) هم می‌تواند اضافه شود: حداقل یکی از دو حوزه (مرکز×نوع یا ایستگاه) الزامی است؛ فی فروش فروشگاهی فقط از حوزه‌ی ایستگاه
@@ -49,18 +50,7 @@ interface Body {
 const day = (d: Date) => d.toISOString().slice(0, 10);
 const num = (v: unknown) => Number(String(v ?? "").replace(/,/g, ""));
 
-function parseDate(raw: unknown): Date {
-  const d = new Date(String(raw ?? ""));
-  if (!raw || Number.isNaN(d.getTime())) throw new PLError("تاریخ اجرا الزامی و باید معتبر باشد");
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-function uniqueInts(raw: unknown, label: string): number[] {
-  if (!Array.isArray(raw) || raw.length === 0) throw new PLError(`حداقل یک ${label} باید انتخاب شود`);
-  const out = [...new Set(raw.map((x) => Number(x)))];
-  if (out.some((x) => !Number.isInteger(x) || x <= 0)) throw new PLError(`${label} نامعتبر است`);
-  return out;
-}
+const parseDate = (raw: unknown): Date => parseDateOnlyUtc(raw, "تاریخ اجرا", (m) => new PLError(m));
 
 /** حوزه‌ها: (مرکز × نوع) اختیاری ولی با هم، و ایستگاه‌ها اختیاری؛ حداقل یکی از دو حوزه */
 function scopeInputs(b: Body) {

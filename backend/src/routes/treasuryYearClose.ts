@@ -3,9 +3,10 @@ import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
-import { CLOSE_SECTIONS, CloseSection, sectionTitle, getCloseContext, previewCounts, closeSection, closeAll, reopenSection } from "../services/treasuryYearCloseService";
+import { CLOSE_SECTIONS, CloseSection, sectionTitle, previewCounts, closeSection, closeAll, reopenSection } from "../services/treasuryYearCloseService";
 
-import { auditRoute, bodyPick } from "../middleware/auditEvent";
+import { auditRoute } from "../middleware/auditEvent";
+import { getCloseContext } from "../utils/fiscalPeriodValidation";
 const FORM = findFormPrefix("treasury-year-close");
 
 // =========================================================================

@@ -17,6 +17,7 @@ import {
   pickableDeliveryAuthorizationLines,
   pickableTempReceiptLines,
 } from "./warehouseReceipts";
+import { partyTitleOrNull } from "../utils/partyTitle";
 
 // =========================================================================
 // «رسید موقت» و «برگشت رسید موقت» (انبار › رسید موقت) — فقط تعدادی، بدون قیمت و بدون سند حسابداری.
@@ -31,16 +32,11 @@ const FORM_RETURN = findFormPrefix("warehousing-temp-receipt-returns");
 
 const num = (v: any) => Number(v);
 
-function partyTitle(p: any): string | null {
-  if (!p) return null;
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 async function partyTitles(detailCodes: (string | null)[]) {
   const codeToPartyId = await resolveDetailEntityIds(detailCodes, "Party");
   const parties = await prisma.party.findMany({ where: { id: { in: Object.values(codeToPartyId) } } });
   const byId = new Map(parties.map((p) => [p.id, p]));
-  return (code: string | null) => (code && codeToPartyId[code] ? partyTitle(byId.get(codeToPartyId[code])) : null);
+  return (code: string | null) => (code && codeToPartyId[code] ? partyTitleOrNull(byId.get(codeToPartyId[code])) : null);
 }
 
 async function supplierIdOfParty(partyId: number) {

@@ -15,7 +15,6 @@ async function main() {
     { code: 6, title: "تنخواه دار", codeLength: 5, startNumber: 600, endNumber: 799 },
     { code: 7, title: "دوره مالی", codeLength: 5, startNumber: 800, endNumber: 899 },
     { code: 8, title: "پروژه", codeLength: 5, startNumber: 900, endNumber: 999 },
-    { code: 9, title: "دارایی ثابت", codeLength: 6, startNumber: 100001, endNumber: 999999 },
   ];
 
   for (const dt of detailTypes) {
@@ -81,6 +80,16 @@ async function main() {
       where: { roleId_actionId: { roleId: adminRole.id, actionId: a.id } },
       update: {},
       create: { roleId: adminRole.id, actionId: a.id },
+    });
+  }
+
+  // مبنای زمانی سیستمی «زمان ساخت» (مبنای تسهیم هزینه‌ی تولید؛ زمان هر کالا در «زمان‌بندی تولید» ثبت می‌شود)
+  {
+    const last = await prisma.costTimeDriver.aggregate({ _max: { code: true } });
+    await prisma.costTimeDriver.upsert({
+      where: { title: "زمان ساخت" },
+      update: { isSystem: true },
+      create: { code: (last._max.code ?? 0) + 1, title: "زمان ساخت", isSystem: true },
     });
   }
 

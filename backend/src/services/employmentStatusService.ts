@@ -3,6 +3,7 @@ import { jalaliMonthRange } from "../utils/jalaliDate";
 import { displayDate } from "../utils/dateDisplay";
 import { tehranDate } from "../jobs/time";
 import { HrError, checkAssignmentRefs } from "./employeeAssignmentService";
+import { trimOrNull, parseIsoDay } from "../utils/inputParse";
 
 // سابقه‌ی وضعیت همکاری کارمند — «تنها منبع» وضعیت و دوره‌های همکاری (مثل سوابق تحصیلی/تاهل/ایثارگری، رکورد مستقلِ تاریخ‌دار):
 //  • هر رکورد: از «تاریخ اعمال» به بعد کارمند در این وضعیت است تا رکورد بعدی. اولین رکورد = شروع همکاری (شاغل).
@@ -17,8 +18,8 @@ type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 type Db = typeof prisma | Tx;
 
 export type EmpStatus = "ACTIVE" | "UNPAID_LEAVE" | "SICK_LEAVE" | "TERMINATED" | "RETIRED" | "SUSPENDED" | "ABANDONED";
-export const EMP_STATUSES: readonly EmpStatus[] = ["ACTIVE", "UNPAID_LEAVE", "SICK_LEAVE", "TERMINATED", "RETIRED", "SUSPENDED", "ABANDONED"];
-export const ENDED_STATUSES: readonly EmpStatus[] = ["TERMINATED", "RETIRED", "ABANDONED"];
+const EMP_STATUSES: readonly EmpStatus[] = ["ACTIVE", "UNPAID_LEAVE", "SICK_LEAVE", "TERMINATED", "RETIRED", "SUSPENDED", "ABANDONED"];
+const ENDED_STATUSES: readonly EmpStatus[] = ["TERMINATED", "RETIRED", "ABANDONED"];
 export const isEnded = (s: string) => (ENDED_STATUSES as readonly string[]).includes(s);
 /** وضعیت‌هایی که برای رکورد تازه قابل ثبت‌اند: بازنشستگی و ترک کار «خاتمه همکاری» با علت مربوطه‌اند (مقدار enum فقط برای داده‌ی قدیمی مانده است) */
 const LEGACY_ENDED: readonly EmpStatus[] = ["RETIRED", "ABANDONED"];
@@ -37,16 +38,7 @@ const addDays = (d: Date, n: number) => new Date(d.getTime() + n * DAY);
 const sameDay = (a: Date, b: Date) => a.getTime() === b.getTime();
 const day = (d: Date | null | undefined) => displayDate(d); // فقط برای متن پیام‌ها
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
-
-function parseDay(v: unknown, label: string): Date {
-  const d = new Date(`${String(v ?? "")}T00:00:00.000Z`);
-  if (!v || isNaN(d.getTime())) throw new HrError(`${label} نامعتبر یا خالی است`);
-  return d;
-}
+const parseDay = (v: unknown, label: string): Date => parseIsoDay(v, label, (m) => new HrError(m), { emptyMessage: `${label} نامعتبر یا خالی است`, invalidMessage: `${label} نامعتبر یا خالی است` }) as Date;
 
 export interface StatusRec {
   id: number;
@@ -136,7 +128,7 @@ export function statusAt(recs: StatusRec[], date: Date): EmpStatus | null {
 }
 
 /** وضعیت جاری = آخرین رکورد تا امروز (امروز به وقت تهران)؛ اگر همه‌ی رکوردها آینده‌اند، اولین رکورد */
-export function currentStatusOf(recs: StatusRec[], todayIso: string = tehranDate()): EmpStatus {
+function currentStatusOf(recs: StatusRec[], todayIso: string = tehranDate()): EmpStatus {
   let cur: StatusRec | undefined;
   for (const r of recs) if (iso(r.effectiveDate)! <= todayIso) cur = r;
   return (cur ?? recs[0])?.status ?? "ACTIVE";
@@ -148,10 +140,6 @@ export async function currentStatuses(ids?: number[]): Promise<Map<number, EmpSt
   const out = new Map<number, EmpStatus>();
   for (const [id, recs] of all) out.set(id, currentStatusOf(recs, t));
   return out;
-}
-
-export async function currentStatus(employeeId: number): Promise<EmpStatus> {
-  return currentStatusOf(await loadRecords(employeeId));
 }
 
 /** آخرین رکورد پایان‌یافته است؟ (انتصاب جدید/تغییر برای کارمندِ پایان‌یافته ممنوع است) */
@@ -294,7 +282,7 @@ export async function changeStatus(employeeId: number, b: any): Promise<void> {
     const rehire = isEnded(last.status) && target === "ACTIVE";
     if (rehire) await checkAssignmentRefs(b);
     const reasonId = await resolveReason(tx, b.terminationReasonId, target);
-    const created = (await tx.employeeStatusRecord.create({ data: { employeeId, effectiveDate: date, status: target, terminationReasonId: reasonId, note: str(b.note) }, select: SEL })) as StatusRec;
+    const created = (await tx.employeeStatusRecord.create({ data: { employeeId, effectiveDate: date, status: target, terminationReasonId: reasonId, note: trimOrNull(b.note) }, select: SEL })) as StatusRec;
 
     if (isEnded(target)) {
       const open = await tx.employeeAssignment.findFirst({ where: { employeeId, toDate: null } });
@@ -340,7 +328,7 @@ export async function updateStatusRecord(employeeId: number, recordId: number, b
       reasonId = b.terminationReasonId ? Number(b.terminationReasonId) : null;
       if (reasonId && !(await tx.terminationReason.findUnique({ where: { id: reasonId } }))) throw new HrError("دلیل خاتمه همکاری یافت نشد");
     }
-    const note = str(b.note);
+    const note = trimOrNull(b.note);
     const updated = recs.map((x) => (x.id === r.id ? { ...x, effectiveDate: newDate, terminationReasonId: reasonId, note } : x));
     checkSequence(updated, r.id);
     const dateChanged = !sameDay(newDate, r.effectiveDate);

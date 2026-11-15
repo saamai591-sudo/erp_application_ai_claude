@@ -5,8 +5,9 @@ import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConve
 import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
-import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
 
 // =========================================================================
 // صدور سند حسابداری «خلاصه تنخواه» — اکشن دستی روی سند تاییدشده، هم‌الگوی services/paymentJournalEntryService.ts:
@@ -37,8 +38,7 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
   if (summary.status !== "APPROVED") throw new Error("فقط برای خلاصه تنخواهِ «تایید»شده می‌توان سند حسابداری صادر کرد");
   if (summary.lines.length === 0) throw new Error("خلاصه تنخواه باید حداقل یک ردیف داشته باشد");
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   const pettyCash = summary.custodian.pettyCash;
   const pettyCashCurrency: ConversionCurrency = pettyCash.currency;

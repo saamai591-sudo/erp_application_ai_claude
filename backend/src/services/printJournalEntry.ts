@@ -69,11 +69,11 @@ export interface JePrintResult {
 // ارتفاع‌های اندازه‌گیری‌شده‌ی قالب پیش‌فرض (میلی‌متر): یک خط متنِ ۸٫۵ پوینتی، هر خطِ اضافه‌ی ناشی از شکستن شرح، فاصله‌ی بالای سطر کل و
 // پایین سطر شرح، و سطر معین (درشت‌تر). RESERVED = سربرگ + سرستون + جمع + امضا + حاشیه‌ی اطمینان؛ برآورد عمداً کمی بدبینانه است
 // تا صفحه‌ی پر هرگز از ورق بیرون نزند (اگر زد، فقط امضا/جمع به ورق بعد می‌رود و داده‌ای گم نمی‌شود).
-export const JE_LINE_MM = 5.4;
-export const JE_WRAP_MM = 4.7;
-export const JE_PAD_MM = 1.7;
-export const JE_LEAF_MM = 6.0;
-export const JE_RESERVED_MM = 78;
+const JE_LINE_MM = 5.4;
+const JE_WRAP_MM = 4.7;
+const JE_PAD_MM = 1.7;
+const JE_LEAF_MM = 6.0;
+const JE_RESERVED_MM = 78;
 /** تعداد نویسه‌ی تقریبی هر خط ستون «شرح» برای برآورد شکستن خط */
 const WRAP_CHARS = 34;
 

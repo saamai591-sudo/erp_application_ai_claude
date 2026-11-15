@@ -44,7 +44,6 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     expiryDate?: string | null;
     sourceType?: "MANUAL" | "PURCHASE" | "PRODUCTION";
     supplierId?: number | null;
-    productionReferenceId?: number | null;
     description?: string | null;
     isActive?: boolean;
   };
@@ -72,7 +71,6 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
         expiryDate: body.expiryDate !== undefined ? (body.expiryDate ? new Date(body.expiryDate) : null) : undefined,
         sourceType: body.sourceType,
         supplierId: body.supplierId,
-        productionReferenceId: body.productionReferenceId,
         description: body.description,
         isActive: body.isActive,
       },

@@ -13,7 +13,7 @@ export interface DatedTreasurySetting {
 }
 
 /** از میان رکوردهای جور (pred)، مؤثرترین برای تاریخ سند را برمی‌گرداند */
-export function pickEffectiveTreasury<T extends DatedTreasurySetting>(list: T[], docDate: Date, pred?: (s: T) => boolean): T | undefined {
+function pickEffectiveTreasury<T extends DatedTreasurySetting>(list: T[], docDate: Date, pred?: (s: T) => boolean): T | undefined {
   const limit = day(docDate);
   let best: T | undefined;
   for (const s of list) {

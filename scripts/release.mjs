@@ -53,7 +53,7 @@ function currentVersion() {
   const v = versionsIn();
   const distinct = new Set(Object.values(v));
   if (distinct.size !== 1) {
-    console.error("✗ نسخه‌ها هم‌خوان نیستند:");
+    console.error("✗ Versions do not match:");
     for (const [k, val] of Object.entries(v)) console.error(`    ${k}: ${val}`);
     process.exit(1);
   }
@@ -70,12 +70,12 @@ function changelogState(version) {
 
 function check() {
   const version = currentVersion();
-  if (!SEMVER.test(version)) fail(`نسخه‌ی «${version}» semver معتبر (x.y.z) نیست`);
+  if (!SEMVER.test(version)) fail(`Version "${version}" is not valid semver (x.y.z)`);
   const { hasHeading, unreleasedBody } = changelogState(version);
-  if (!hasHeading) fail(`CHANGELOG.md بخشی برای نسخه‌ی ${version} ندارد (## [${version}])`);
-  if (unreleasedBody === null) fail("CHANGELOG.md بخش «## [Unreleased]» ندارد");
-  console.log(`✓ نسخه‌ی ${version} در هر چهار فایل یکسان است و در CHANGELOG.md ثبت شده است.`);
-  if (unreleasedBody) console.log("  یادآوری: تغییرات منتشرنشده‌ای زیر [Unreleased] هست؛ با انتشار بعدی نسخه‌گذاری می‌شوند.");
+  if (!hasHeading) fail(`CHANGELOG.md has no section for version ${version} (## [${version}])`);
+  if (unreleasedBody === null) fail("CHANGELOG.md has no \"## [Unreleased]\" section");
+  console.log(`✓ Version ${version} is the same in all four files and is listed in CHANGELOG.md.`);
+  if (unreleasedBody) console.log("  Note: there are unreleased changes under [Unreleased]; they get versioned by the next release.");
 }
 
 function bump(current, arg) {
@@ -84,24 +84,24 @@ function bump(current, arg) {
   if (arg === "major") return `${maj + 1}.0.0`;
   if (arg === "minor") return `${maj}.${min + 1}.0`;
   if (arg === "patch") return `${maj}.${min}.${pat + 1}`;
-  return fail(`آرگومان «${arg}» نامعتبر است (patch | minor | major | x.y.z | --check)`);
+  return fail(`Invalid argument "${arg}" (patch | minor | major | x.y.z | --check)`);
 }
 
 // فقط مقدار version را جایگزین می‌کند، بدون بازنویسی/فرمت‌دهی دوباره‌ی کل فایل
 function replaceVersion(rel, oldV, newV, occurrences) {
   let n = 0;
   const out = read(rel).replace(new RegExp(`("version":\\s*")${oldV.replace(/\./g, "\\.")}(")`, "g"), (m, a, b) => (++n <= occurrences ? `${a}${newV}${b}` : m));
-  if (n < occurrences) fail(`${rel}: مقدار version پیدا نشد`);
+  if (n < occurrences) fail(`${rel}: version value not found`);
   write(rel, out);
 }
 
 function release(arg, opts) {
   const current = currentVersion();
   const next = bump(current, arg);
-  if (next === current) fail(`نسخه‌ی ${next} همین الان ثبت شده است`);
+  if (next === current) fail(`Version ${next} is already the current version`);
   const { text, unreleasedBody } = changelogState(current);
   if (unreleasedBody === null) fail("CHANGELOG.md بخش «## [Unreleased]» ندارد");
-  if (!unreleasedBody && !opts.allowEmpty) fail("بخش [Unreleased] در CHANGELOG.md خالی است؛ ابتدا تغییرات این انتشار را بنویسید (یا --allow-empty)");
+  if (!unreleasedBody && !opts.allowEmpty) fail("The [Unreleased] section of CHANGELOG.md is empty; write this release's changes first (or use --allow-empty)");
 
   replaceVersion(FILES.backendPkg, current, next, 1);
   replaceVersion(FILES.frontendPkg, current, next, 1);
@@ -112,11 +112,11 @@ function release(arg, opts) {
   const updated = text.replace(/^## \[Unreleased\]\s*\n/m, `## [Unreleased]\n\n## [${next}] - ${date}\n`);
   write(CHANGELOG, updated);
 
-  console.log(`✓ نسخه از ${current} به ${next} تغییر کرد (چهار فایل + CHANGELOG.md).`);
-  console.log("\nمراحل بعد:");
+  console.log(`✓ Version changed from ${current} to ${next} (four files + CHANGELOG.md).`);
+  console.log("\nNext steps:");
   console.log(`  git add -A && git commit -m "Release v${next}"`);
   console.log(`  git tag v${next} && git push origin main --tags`);
-  console.log(`  ساخت ایمیج‌ها با تگ نسخه:  docker build -t <registry>/accounting-erp-backend:${next} ./backend   (و frontend)`);
+  console.log(`  Build images: node scripts/build-release.mjs --registry <registry> --push`);
 }
 
 const args = process.argv.slice(2);
@@ -127,4 +127,4 @@ const positional = args.filter((a) => !a.startsWith("--"));
 
 if (args.includes("--check")) check();
 else if (positional.length === 1) release(positional[0], flags);
-else fail("استفاده: node scripts/release.mjs <patch|minor|major|x.y.z> [--date=YYYY-MM-DD] [--allow-empty]   یا   --check");
+else fail("Usage: node scripts/release.mjs <patch|minor|major|x.y.z> [--date=YYYY-MM-DD] [--allow-empty]   or   --check");

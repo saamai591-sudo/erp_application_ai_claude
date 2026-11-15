@@ -17,9 +17,12 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
-import { partyDisplayName } from "./Users";
+
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { DescriptionField } from "../components/DescriptionField";
+import { CheckIcon, UndoIcon, RejectIcon, CloseFlagIcon, PlusIcon } from "../components/icons";
+import { partyDisplayName } from "../lib/partyDisplay";
+import { REQUEST_STATUS_FA } from "../lib/enumLabels";
 
 type RequestNature = "CENTER_REQUEST" | "PROJECT_REQUEST" | "FIXED_ASSET_REQUEST";
 type RequestStatus = "DRAFT" | "REVIEWED" | "APPROVED" | "REJECTED" | "CLOSED";
@@ -84,9 +87,6 @@ interface Detail {
   lines: DetailLine[];
 }
 
-const STATUS_FA: Record<RequestStatus, string> = { DRAFT: "ثبت", REVIEWED: "بررسی شده", APPROVED: "تایید", REJECTED: "رد", CLOSED: "پایان" };
-const NATURE_FA: Record<RequestNature, string> = { CENTER_REQUEST: "درخواست مرکز", PROJECT_REQUEST: "درخواست پروژه", FIXED_ASSET_REQUEST: "درخواست دارایی ثابت" };
-
 const INFO_TEXT =
   "یکپارچه‌سازی فرآیندهای درخواست کالا توسط کاربران مختلف از واحدهای سازمانی مختلف. " +
   "بسته به «ماهیت» نوع درخواست انتخاب‌شده، فیلد «محل مصرف» هر ردیف به‌ترتیب مرکز هزینه، پروژه یا طرف حساب (شخص حقیقی) خواهد بود. " +
@@ -102,48 +102,10 @@ export default function GoodsRequests() {
   return <GoodsRequestList />;
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function RejectIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function CloseFlagIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M6 21V4M6 4h12l-3 4 3 4H6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function GoodsRequestList() {
   const cacheKey = "/goods-requests";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     try {
@@ -191,7 +153,7 @@ function GoodsRequestList() {
           { header: "واحد سازمانی", render: (r) => r.orgUnitTitle, filterType: "string", filterValue: (r) => r.orgUnitTitle },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.lineCount)) },
-          { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          { header: "وضعیت", render: (r) => <span className="badge">{REQUEST_STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => REQUEST_STATUS_FA[r.status] },
         ]}
         rows={items}
         edit={{ path: (r) => `/goods-requests/${r.id}/edit` }}
@@ -458,7 +420,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
       title={editId ? "ویرایش درخواست کالا" : "درخواست کالای جدید"}
       description={
         isFullyLocked
-          ? `این درخواست در وضعیت «${STATUS_FA[status]}» است و از این فرم قابل ویرایش نیست.`
+          ? `این درخواست در وضعیت «${REQUEST_STATUS_FA[status]}» است و از این فرم قابل ویرایش نیست.`
           : isReviewedMode
           ? "در وضعیت «بررسی شده» فقط ستون‌های «مقدار تایید شده» و «شرح تایید» قابل ویرایش هستند."
           : undefined
@@ -482,7 +444,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>وضعیت</label>
-            <div><span className="badge">{STATUS_FA[status]}</span></div>
+            <div><span className="badge">{REQUEST_STATUS_FA[status]}</span></div>
           </div>
           <div className="form-field">
             <label>تاریخ<RequiredMark /></label>

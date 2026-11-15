@@ -3,6 +3,7 @@ import { getCurrentFiscalPeriod } from "../lib/prisma";
 import { buildAccountByIdMap, computeFullAccountCode } from "../utils/accountCode";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { getDetailLevels } from "./accountingSettingsService";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
 
 // گزارش «تراز حسابها» (حسابداری › گزارش؛ مستند `Documents/گزارش تراز حسابها.docx`).
 // دو نوع: «تراز» (یک سطح حساب: کل/معین/جزء…) و «تحلیلی» (حداکثر سه بُعد تودرتو؛ هر بُعد یک سطح حساب یا یک سطح تفصیل).
@@ -54,9 +55,8 @@ export interface BalanceResult {
   dimTitles: string[];
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const net = (d: number, c: number): [number, number] => {
-  const diff = round2(d - c);
+  const diff = roundToCurrencyDecimals(d - c, 2);
   return diff >= 0 ? [diff, 0] : [0, -diff];
 };
 
@@ -264,8 +264,8 @@ export async function computeAccountBalance(input: BalanceInput): Promise<Balanc
         hasChildren: n.children.size > 0,
         openDebit: od,
         openCredit: oc,
-        periodDebit: round2(n.perD),
-        periodCredit: round2(n.perC),
+        periodDebit: roundToCurrencyDecimals(n.perD, 2),
+        periodCredit: roundToCurrencyDecimals(n.perC, 2),
         remainDebit: rd,
         remainCredit: rc,
       });
@@ -281,7 +281,7 @@ export async function computeAccountBalance(input: BalanceInput): Promise<Balanc
     }
   };
   emit(root);
-  for (const k of Object.keys(totals) as (keyof typeof totals)[]) totals[k] = round2(totals[k]);
+  for (const k of Object.keys(totals) as (keyof typeof totals)[]) totals[k] = roundToCurrencyDecimals(totals[k], 2);
 
   return { rows, totals, dimTitles };
 }

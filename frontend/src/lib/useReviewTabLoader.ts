@@ -14,7 +14,7 @@ export interface TabViewState {
   filters: Record<string, ActiveFilter>;
   sort: { header: string; dir: "asc" | "desc" } | null;
 }
-export const DEFAULT_TAB_VIEW: TabViewState = { filters: {}, sort: null };
+const DEFAULT_TAB_VIEW: TabViewState = { filters: {}, sort: null };
 
 /**
  * زیرساخت مشترکِ همان الگو — قبلاً هر گزارش (WarehouseReview.tsx/AccountsReview.tsx) یک state جدا

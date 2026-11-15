@@ -10,7 +10,7 @@ import { BAND_KEY_RE } from "./attendanceFormulaDefs";
 
 const DAY = 1440;
 
-export const bandVarKey = (id: number) => `TB${id}`;
+const bandVarKey = (id: number) => `TB${id}`;
 
 export function bandShape(b: any) {
   return { id: b.id, title: b.title, isActive: b.isActive, description: b.description ?? "", versionCount: b._count?.versions, updatedAt: b.updatedAt };
@@ -35,7 +35,7 @@ export async function saveBand(body: any, id?: number) {
 }
 
 /** فرمول‌هایی که به متغیر این بازه ارجاع می‌دهند (عنوان عامل‌ها) */
-export async function factorsUsingBand(id: number): Promise<string[]> {
+async function factorsUsingBand(id: number): Promise<string[]> {
   const re = new RegExp(`\\[(V|T):${bandVarKey(id)}(:[A-Za-z_]+)?\\]`, "i");
   return formulaUsers(re);
 }

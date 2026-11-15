@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // گزارش «مرور فروش» (Documents/SalesReviewReport.md) — منبع داده‌ی مشترک همه‌ی تب‌ها.
@@ -67,10 +68,6 @@ export interface SaleReturnLine extends SaleDimensionFields {
   salesReturnInvoiceId: number;
   salesReturnInvoiceNumber: number;
   date: Date;
-}
-
-function partyTitle(p: any): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
 export async function getSaleLines(f: SaleLineFilters): Promise<SaleLine[]> {

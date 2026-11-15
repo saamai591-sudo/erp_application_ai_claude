@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
 
 // «اعلامیه قیمت فروش»: تنها محل محاسبه‌ی فی پیشنهادیِ سیستم برای پیش‌فاکتور.
 // - اعلامیه‌ی مؤثر هر ترکیب (مرکز فروش × نوع فروش × ارز) = آخرین اعلامیه‌ی فعال با تاریخ اجرای ≤ تاریخ سند
@@ -29,11 +30,9 @@ export interface ComputedPrice {
   ruleId: number | null;
 }
 
-const roundTo = (v: number, dp: number) => Math.round(v * 10 ** dp) / 10 ** dp;
-
 /** قیمت یک پله نسبت به فی پایه (PERCENT: مثبت = اضافه، منفی = کسر) */
-export function tierPrice(basePrice: number, effect: "ABSOLUTE" | "PERCENT", value: number, decimalPlaces: number): number {
-  return effect === "ABSOLUTE" ? roundTo(value, decimalPlaces) : roundTo(basePrice * (1 + value / 100), decimalPlaces);
+function tierPrice(basePrice: number, effect: "ABSOLUTE" | "PERCENT", value: number, decimalPlaces: number): number {
+  return effect === "ABSOLUTE" ? roundToCurrencyDecimals(value, decimalPlaces) : roundToCurrencyDecimals(basePrice * (1 + value / 100), decimalPlaces);
 }
 
 /** اعلامیه‌ی مؤثر برای ترکیب مرکز×نوع×ارز در تاریخ؛ null = اعلامیه‌ای نیست */

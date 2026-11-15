@@ -21,12 +21,13 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { MARITAL_FA } from "../lib/enumLabels";
 
 // منابع انسانی › پرسنلی › کارمندان. کارمند «نقش» روی یک شخص حقیقی است (نام/کد ملی/نشانی/تلفن/حساب بانکی همان شخص‌اند و اینجا تکرار نمی‌شوند)؛
 // تاریخ تولد و جنسیت روی خودِ شخص ذخیره می‌شود. وضعیت و انتصاب با عملیات جدا (دکمه‌های «تغییر وضعیت» و «انتصاب جدید») تغییر می‌کنند تا سابقه بماند:
 // وضعیت همکاری = «سوابق وضعیت» (رکوردهای تاریخ‌دار: شروع، مرخصی، تعلیق، خاتمه/بازنشستگی/ترک کار در اولین روز بعد از همکاری، شاغل مجدد)؛ وضعیت جاری و دوره‌ها از آن‌ها مشتق می‌شوند.
 
-export const EMPLOYEE_STATUS_FA: Record<string, string> = {
+const EMPLOYEE_STATUS_FA: Record<string, string> = {
   ACTIVE: "شاغل",
   UNPAID_LEAVE: "مرخصی بدون حقوق",
   SICK_LEAVE: "مرخصی استعلاجی",
@@ -37,7 +38,6 @@ export const EMPLOYEE_STATUS_FA: Record<string, string> = {
 };
 const DECREE_VALIDITY_FA: Record<string, string> = { VALID: "معتبر", EXPIRED: "منقضی", NONE: "بدون حکم" };
 const ENDED = ["TERMINATED", "RETIRED", "ABANDONED"];
-const MARITAL_FA: Record<string, string> = { SINGLE: "مجرد", MARRIED: "متاهل", DIVORCED: "مطلقه", WIDOWED: "همسر فوت‌شده" };
 const MILITARY_FA: Record<string, string> = {
   NOT_APPLICABLE: "مشمول نیست",
   COMPLETED: "پایان خدمت",
@@ -303,7 +303,7 @@ export function OrgUnitOfCostCenter({ costCenters, costCenterId }: { costCenters
 }
 
 /** شغل‌های تخصیص‌داده‌شده به یک پست */
-export function jobsOfPosition(positions: Opt[], positionId: string): PositionJobOpt[] {
+function jobsOfPosition(positions: Opt[], positionId: string): PositionJobOpt[] {
   return positions.find((p) => String(p.id) === positionId)?.jobs ?? [];
 }
 /** با انتخاب پست: شغلِ فعلی اگر جزو شغل‌های پست جدید نبود پاک می‌شود؛ پستی که فقط یک شغل دارد همان را خودکار ست می‌کند */

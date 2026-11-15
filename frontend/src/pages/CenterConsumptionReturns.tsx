@@ -21,6 +21,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
 
 // «برگشت مصرف مرکز هزینه» — طبق stockAnalysis.md بند ۴۰: همیشه به یک ردیف مصرف مرکز هزینه‌ی
 // قطعی‌شده Reference می‌دهد (نه «بدون مبنا») + کنترل ReturnedQuantity <= IssuedQuantity. نگاه کنید به
@@ -51,10 +52,6 @@ export default function CenterConsumptionReturns() {
   if (isNew) return <CenterConsumptionReturnForm basePath={basePath} />;
   if (isEdit) return <CenterConsumptionReturnForm basePath={basePath} editId={Number(id)} />;
   return <CenterConsumptionReturnList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function CenterConsumptionReturnList({ basePath }: { basePath: string }) {
@@ -129,7 +126,7 @@ function CenterConsumptionReturnForm({ editId, basePath }: { editId?: number; ba
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("CENTER_CONSUMPTION_RETURN");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; description: string; details: DetailValues },
     RowState,
     Detail

@@ -40,7 +40,6 @@ function UnitList() {
   const cacheKey = "/units-of-measure";
   const [items, setItems] = usePersistedState<UnitOfMeasure[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/units-of-measure").then(setItems).catch((e) => setError(e.message));

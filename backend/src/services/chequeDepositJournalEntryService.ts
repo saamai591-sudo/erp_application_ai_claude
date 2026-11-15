@@ -3,8 +3,10 @@ import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
-import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { EffectiveTreasurySettings } from "./treasurySettingService";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // صدور سند حسابداری «واگذاری چک به بانک» (ChequeDeposit) — اکشن دستی روی سند تاییدشده (هم‌الگوی سند دریافت/پرداخت)،
@@ -20,10 +22,6 @@ import { findIssuingDocType } from "./documentTypeService";
 // سطوح تفصیل خود به همان نوع تفصیل وصل باشد (resolveAccountDetailFields).
 // =========================================================================
 
-function partyDisplayName(p: any): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 export async function issueChequeDepositJournalEntry(depositId: number) {
   const deposit = await prisma.chequeDeposit.findUnique({
     where: { id: depositId },
@@ -37,8 +35,7 @@ export async function issueChequeDepositJournalEntry(depositId: number) {
   if (deposit.status !== "APPROVED") throw new Error("فقط برای سند واگذاریِ «تایید»شده می‌توان سند حسابداری صادر کرد");
   if (deposit.lines.length === 0) throw new Error("سند واگذاری چکی ندارد");
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   const treasurySettings = new EffectiveTreasurySettings(await prisma.treasuryAccountSetting.findMany({ include: { account: true } }) as any[]);
   const description = `بابت واگذاری چک به بانک ${deposit.number} ${formatJalaliDateForMessage(deposit.date)} حساب ${deposit.bankAccount.accountNumber}`.trim();
@@ -74,7 +71,7 @@ export async function issueChequeDepositJournalEntry(depositId: number) {
       debit: 0,
       credit: Number(cheque.amount),
       fxRate: 1,
-      description: `${description} — چک ${cheque.number} ${partyDisplayName(cheque.party)}`.trim(),
+      description: `${description} — چک ${cheque.number} ${partyTitle(cheque.party)}`.trim(),
     });
   }
 

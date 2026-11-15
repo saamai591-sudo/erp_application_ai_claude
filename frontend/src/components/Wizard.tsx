@@ -13,7 +13,7 @@ function CheckIcon() {
   );
 }
 
-export function WizardSteps({ steps, activeStep }: { steps: WizardStepDef[]; activeStep: number }) {
+function WizardSteps({ steps, activeStep }: { steps: WizardStepDef[]; activeStep: number }) {
   return (
     <div className="wizard-steps">
       {steps.map((s, i) => (

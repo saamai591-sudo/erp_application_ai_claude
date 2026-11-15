@@ -9,7 +9,7 @@ import { listQuantityCloseStatus, closeWarehouseQuantity, reopenWarehouseQuantit
 // services/warehouseQuantityCloseService.ts — این فایل فقط لایه‌ی REST است.
 // =========================================================================
 
-import { auditRoute, bodyPick } from "../middleware/auditEvent";
+import { auditRoute } from "../middleware/auditEvent";
 const FORM = findFormPrefix("warehousing-quantity-close");
 
 const router = Router();

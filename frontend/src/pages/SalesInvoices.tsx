@@ -32,6 +32,8 @@ import { Modal } from "../components/Modal";
 import { DescriptionField } from "../components/DescriptionField";
 import type { InvoiceFromDeliveryPrefill } from "../components/DownstreamDialogs";
 import { takeFormPrefill } from "../lib/formPrefill";
+import { PlusIcon, UndoIcon, EyeIcon, VoidIcon } from "../components/icons";
+import { partyTitleOf } from "../lib/partyDisplay";
 
 // «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
 // (که هر ردیف رسید انبار خرید را دقیقاً یک‌بار و کامل مصرف می‌کرد)، اینجا طبق تصمیم صریح کاربر رابطه
@@ -79,11 +81,6 @@ interface BasisLine {
   baseUninvoicedQuantity?: number | null;
 }
 
-function customerTitle(c: CustomerOption): string {
-  if (c.party.detailTitle) return c.party.detailTitle;
-  return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
-}
-
 type SalesInvoiceStatus = "DRAFT" | "VOIDED";
 const SALES_INVOICE_STATUS_FA: Record<SalesInvoiceStatus, string> = { DRAFT: "ثبت", VOIDED: "باطل شده" };
 interface ListRow { id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; advanceAmount: number }
@@ -103,35 +100,7 @@ export default function SalesInvoices() {
   return <SalesInvoiceList />;
 }
 
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function EyeIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
 // دقیقاً هم‌شکل VoidIcon در ChequeBookLeaves.tsx — الگوی یکسان برای اکشن «ابطال» در کل سیستم.
-function VoidIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M6 6l12 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 // ستون‌های قابل فیلتر/مرتب‌سازی سمت سرور (صفحه‌بندی سمت سرور برای دیتای حجیم). «مبلغ کل» و «پیش‌دریافت» مقدار محاسبه‌شده‌ی همان صفحه‌اند.
 const SERVER_FIELD_MAP: Record<string, string> = {
   "شماره": "number",
@@ -457,13 +426,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
-  }
-  // مانده‌ی مؤثر یک ردیف بر اساس سند مبنایش: مانده‌ی سرور منهای مقدار سایر ردیف‌های همین فاکتور که به همان ردیف مبنا ارجاع می‌دهند (زنده، با هر تغییر ردیف‌ها)
-  function effectiveRemaining(row: RowState, excludeIdx: number): number | null {
-    if (row.remaining == null) return null;
-    const key = sourceKey(row);
-    const usedByOthers = key ? rows.reduce((sum, r, i) => (i !== excludeIdx && sourceKey(r) === key ? sum + (Number(r.quantity) || 0) : sum), 0) : 0;
-    return Math.round((row.remaining - usedByOthers) * 1e6) / 1e6;
   }
   // تغییر مبنای یک ردیف: ردیف از نو (با همان مبنا) شروع می‌شود؛ سند مبدا/کالا/مقدار قبلی پاک می‌شود چون مبنای جدید فهرست و قواعد دیگری دارد
   function onBasisChange(idx: number, basis: Basis) {
@@ -819,12 +781,12 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               disabled={headerDisabled}
               displayValue={(() => {
                 const c = customers.find((x) => String(x.id) === header.customerId);
-                return c ? `${toFaDigits(String(c.code))} — ${customerTitle(c)}` : "";
+                return c ? `${toFaDigits(String(c.code))} — ${partyTitleOf(c)}` : "";
               })()}
               rows={customers}
               columns={[
                 { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                { header: "عنوان", render: (x) => customerTitle(x), filterValue: (x) => customerTitle(x) },
+                { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
               ]}
               onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
             />
@@ -892,7 +854,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   // «بدون مبنا» (و هر مبنایی که کالا/انبار ندارد): فقط خدمت قابل انتخاب است. انتخابگر کالا/خدمت همان رفتار قبلی (تک‌انتخابی) را دارد.
                   const servicePickerRows = goodsItems.filter((g) => g.kind === "SERVICE" && g.isActive);
-                  const remaining = effectiveRemaining(row, idx);
                   // فی/مبلغ ردیفی که از سند مبنا محاسبه می‌شود قابل ویرایش نیست (Documents/فراخوانی قیمت در فاکتور.md)
                   const priceLocked = row.priceLocked;
                   const hasSource = !!sourceKey(row);

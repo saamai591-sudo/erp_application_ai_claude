@@ -17,6 +17,6 @@ const store = new TabScopedStore<AttendanceReviewSnapshot>();
 
 export const getAttendanceReviewSnapshot = () => store.get();
 export const setAttendanceReviewSnapshot = (s: AttendanceReviewSnapshot) => store.set(s);
-export const clearAttendanceReviewSnapshot = () => store.clearAll();
+const clearAttendanceReviewSnapshot = () => store.clearAll();
 
 registerReviewReportCache("/attendance-review", clearAttendanceReviewSnapshot);

@@ -1,4 +1,3 @@
-import { prisma } from "../lib/prisma";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
 // =========================================================================
@@ -26,12 +25,12 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 export type NumberingFormKey = "SALES_INVOICE" | "SALES_RETURN";
 
 /** پیام ذخیره‌ی سند بدون الگوی شماره‌گذاری (فاکتور فروش / برگشت از فروش) */
-export const NO_PATTERN_MESSAGE = "برای این مرکز و نوع فروش، الگوی شماره‌گذاری تعریف نشده است.";
+const NO_PATTERN_MESSAGE = "برای این مرکز و نوع فروش، الگوی شماره‌گذاری تعریف نشده است.";
 
 export const FORM_TITLE: Record<NumberingFormKey, string> = { SALES_INVOICE: "فاکتور فروش", SALES_RETURN: "برگشت از فروش" };
 
 /** الگوی مربوط به یک سند (بر اساس فرم + نوع فروش + مرکز فروش) یا null اگر هیچ الگویی ندارد (شماره‌گذاری قدیمی) */
-export async function findPatternFor(db: any, form: NumberingFormKey, salesTypeId: number, salesCenterId: number) {
+async function findPatternFor(db: any, form: NumberingFormKey, salesTypeId: number, salesCenterId: number) {
   const item = await db.numberingPatternItem.findUnique({
     where: { form_salesTypeId_salesCenterId: { form, salesTypeId, salesCenterId } },
     include: { pattern: true },
@@ -44,7 +43,7 @@ function scopeOf(pattern: { resetPerFiscalYear: boolean }, fiscalPeriodId: numbe
 }
 
 /** آخرین تاریخ اسناد ثبت‌شده با این الگو (در حالت ریست سالانه فقط همان سال مالی)؛ excludeId/excludeForm: سندِ در حال ویرایش */
-export async function latestDocumentDate(
+async function latestDocumentDate(
   db: any,
   pattern: { id: number; resetPerFiscalYear: boolean },
   fiscalPeriodId: number,

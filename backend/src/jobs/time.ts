@@ -1,6 +1,6 @@
 // ابزار زمان به وقت تهران برای زمان‌بند. ایران ساعت تابستانی ندارد؛ آفست ثابت +۰۳:۳۰ است.
 
-export const TEHRAN_OFFSET_MINUTES = 210;
+const TEHRAN_OFFSET_MINUTES = 210;
 const MS_MINUTE = 60_000;
 const MS_DAY = 86_400_000;
 
@@ -48,4 +48,3 @@ export function isoToDate(iso: string): Date {
 }
 
 export const ISO_DATE_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
-export const WEEKDAY_TITLES_FA = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"];

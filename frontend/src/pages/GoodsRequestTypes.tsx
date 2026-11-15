@@ -42,7 +42,6 @@ function RequestTypeList() {
   const cacheKey = "/goods-request-types";
   const [items, setItems] = usePersistedState<GoodsRequestType[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/goods-request-types").then(setItems).catch((e) => setError(e.message));

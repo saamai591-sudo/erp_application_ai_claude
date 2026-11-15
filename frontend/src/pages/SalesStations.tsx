@@ -18,6 +18,7 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { partyTitleOf } from "../lib/partyDisplay";
 
 // فروش فروشگاهی › تنظیمات › «ایستگاه فروش»: صندوقِ دریافت نقد، انبارِ کسر موجودی (فقط وقتی ایستگاه کالا ارائه می‌کند)، نوع ارائه (کالا / خدمت / هر دو)، نوع فروش،
 // مشتری پیش‌فرض و مرکز هزینه. فی فروش ایستگاه از «اعلامیه قیمت فروش» با حوزه‌ی همین ایستگاه می‌آید. قواعد در سرور (routes/salesStations.ts).
@@ -87,8 +88,6 @@ interface CostCenterOpt {
   detailCode: string;
   title: string;
 }
-
-const customerTitleOf = (c: CustomerOpt) => c.party.detailTitle || (c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim());
 
 export default function SalesStations() {
   const location = useLocation();
@@ -337,11 +336,11 @@ function StationForm({ editId }: { editId?: number }) {
             <label>مشتری پیش‌فرض<RequiredMark /> <FieldHint label="مشتری پیش‌فرض" text="در فرم فروش این ایستگاه مشتری به‌طور پیش‌فرض همین است و قابل تغییر است (مثلاً «مشتری متفرقه»)." /></label>
             <RecordPickerField<CustomerOpt>
               title="انتخاب مشتری"
-              displayValue={customer ? `${toFaDigits(String(customer.code))} — ${customerTitleOf(customer)}` : ""}
+              displayValue={customer ? `${toFaDigits(String(customer.code))} — ${partyTitleOf(customer)}` : ""}
               rows={customers}
               columns={[
                 { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                { header: "عنوان", render: (x) => customerTitleOf(x), filterValue: (x) => customerTitleOf(x) },
+                { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
               ]}
               onSelect={(x) => setForm({ ...form, customerId: String(x.id) })}
             />

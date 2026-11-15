@@ -1,3 +1,4 @@
+import { toEnglishDigits } from "./digits";
 // برچسب‌های مشترک ماژول حقوق و دستمزد (طبقه، روش، نوع پارامتر، ماه شمسی)
 
 /** طبقه‌ی عامل */
@@ -33,7 +34,7 @@ export function hoursToHm(v: number): string {
 }
 /** «۱۰:۳۰» یا «10.5» → ساعت اعشاری (null = نامعتبر) */
 export function parseHours(s: string): number | null {
-  const t = s.trim().replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
+  const t = toEnglishDigits(s.trim());
   if (!t) return null;
   const m = /^(\d+):(\d{1,2})$/.exec(t);
   if (m) return Number(m[1]) + Number(m[2]) / 60;

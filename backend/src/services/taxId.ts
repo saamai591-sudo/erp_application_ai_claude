@@ -31,7 +31,7 @@ const P = [
 const INV = [0, 4, 3, 2, 1, 5, 6, 7, 8, 9];
 
 /** رقم کنترلی Verhoeff برای یک رشته‌ی عددی (رقم کنترلی خودش را شامل نیست) */
-export function verhoeffCheckDigit(num: string): number {
+function verhoeffCheckDigit(num: string): number {
   let c = 0;
   const digits = num.split("").reverse().map(Number);
   for (let i = 0; i < digits.length; i++) c = D[c][P[(i + 1) % 8][digits[i]]];
@@ -41,7 +41,7 @@ export function verhoeffCheckDigit(num: string): number {
 const DAY_MS = 86_400_000;
 
 /** تعداد روزهای سپری‌شده از 1970-01-01 تا لحظه‌ی داده‌شده (مهر زمانی یونیکس به میلی‌ثانیه) */
-export function unixDays(ms: number): number {
+function unixDays(ms: number): number {
   return Math.floor(ms / DAY_MS);
 }
 

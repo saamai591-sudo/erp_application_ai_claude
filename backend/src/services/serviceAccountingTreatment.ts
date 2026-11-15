@@ -13,9 +13,7 @@ import { prisma } from "../lib/prisma";
 export type ServiceTreatment = "EXPENSE" | "INVENTORY_COST";
 export type CostLineBasis = "NO_BASIS" | "WAREHOUSE_RECEIPT";
 
-export const TREATMENT_FA: Record<ServiceTreatment, string> = { EXPENSE: "هزینه", INVENTORY_COST: "بهای موجودی" };
-
-export function serviceTreatmentOf(service: { accountingTreatment?: string | null }): ServiceTreatment {
+function serviceTreatmentOf(service: { accountingTreatment?: string | null }): ServiceTreatment {
   return service.accountingTreatment === "INVENTORY_COST" ? "INVENTORY_COST" : "EXPENSE";
 }
 

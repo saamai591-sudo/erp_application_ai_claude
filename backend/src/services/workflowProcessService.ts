@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
 import { BRANCH_STEP_EVENTS, CONDITION_FIELDS, EVENT_BY_KEY, ROOT_TYPE_FA, WORKFLOW_EVENTS, cleanConditions, type RootType } from "./workflowEvents";
+import { collapseOrNull } from "../utils/inputParse";
 
 // تعریف فرایند (کارتابل): هویت + نسخه‌ها + مراحل + مسئول‌ها. تنها نویسنده‌ی WorkflowProcess/Version/Step/StepAssignee همین سرویس است.
 // ویرایش: اگر برای نسخه‌ی جاری نمونه‌ای ساخته شده باشد، «نسخه‌ی تازه» ساخته می‌شود (نمونه‌های در جریان با نسخه‌ی خودشان ادامه می‌دهند)،
@@ -8,7 +9,6 @@ import { BRANCH_STEP_EVENTS, CONDITION_FIELDS, EVENT_BY_KEY, ROOT_TYPE_FA, WORKF
 
 export class ProcessError extends Error {}
 
-const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ") : null);
 const posInt = (v: unknown, label: string): number | null => {
   if (v === undefined || v === null || v === "") return null;
   const n = Number(v);
@@ -44,7 +44,7 @@ interface ProcessData {
 
 /** بدنه‌ی فرم → داده‌ی نرمال‌شده (همه‌ی کنترل‌ها) */
 export async function validateProcess(b: any, excludeId?: number): Promise<ProcessData> {
-  const title = str(b.title);
+  const title = collapseOrNull(b.title);
   if (!title) throw new ProcessError("عنوان الزامی است");
   if (await prisma.workflowProcess.findFirst({ where: { title, ...(excludeId ? { NOT: { id: excludeId } } : {}) } })) throw new ProcessError("فرایند دیگری با همین عنوان وجود دارد");
   const rootType: RootType = "SALES_QUOTE";
@@ -63,7 +63,7 @@ export async function validateProcess(b: any, excludeId?: number): Promise<Proce
   const userIds = new Set<number>(), roleIds = new Set<number>();
   for (const [i, r] of raw.entries()) {
     const n = i + 1;
-    const stepTitle = str(r.title);
+    const stepTitle = collapseOrNull(r.title);
     if (!stepTitle) throw new ProcessError(`مرحله ${n}: عنوان الزامی است`);
     const completion = r.completion === "EVENT" ? "EVENT" : "MANUAL";
     let completionEvent: string | null = null;
@@ -105,7 +105,7 @@ export async function validateProcess(b: any, excludeId?: number): Promise<Proce
       } else throw new ProcessError(`مرحله ${n}: مسئول ناقص است`);
     }
     if (isActive && completion === "MANUAL" && assignees.length === 0) throw new ProcessError(`مرحله ${n} («${stepTitle}»): برای فرایند فعال، مرحله‌ی دستی باید دست‌کم یک مسئول داشته باشد`);
-    steps.push({ seq: n, title: stepTitle, description: str(r.description), completion, completionEvent, requireNote: r.requireNote === undefined ? true : !!r.requireNote, requireAttachment: r.requireAttachment === undefined ? true : !!r.requireAttachment, branchPerEvent, deadlineHours, reminderHours, escalateUserId, escalateRoleId, entryCondition, assignees });
+    steps.push({ seq: n, title: stepTitle, description: collapseOrNull(r.description), completion, completionEvent, requireNote: r.requireNote === undefined ? true : !!r.requireNote, requireAttachment: r.requireAttachment === undefined ? true : !!r.requireAttachment, branchPerEvent, deadlineHours, reminderHours, escalateUserId, escalateRoleId, entryCondition, assignees });
   }
   const branchAt = steps.findIndex((x) => x.branchPerEvent);
   if (branchAt >= 0) {
@@ -117,7 +117,7 @@ export async function validateProcess(b: any, excludeId?: number): Promise<Proce
   }
   if (userIds.size && (await prisma.user.count({ where: { id: { in: [...userIds] } } })) !== userIds.size) throw new ProcessError("یکی از کاربران انتخاب‌شده یافت نشد");
   if (roleIds.size && (await prisma.role.count({ where: { id: { in: [...roleIds] } } })) !== roleIds.size) throw new ProcessError("یکی از نقش‌های انتخاب‌شده یافت نشد");
-  return { title, description: str(b.description), isActive, rootType, startEvent: ev.key, startCondition, steps };
+  return { title, description: collapseOrNull(b.description), isActive, rootType, startEvent: ev.key, startCondition, steps };
 }
 
 const stepCreate = (steps: StepData[]) =>

@@ -140,6 +140,10 @@ const RAW_MODULES: ModuleGroup[] = [
         ],
       },
       {
+        title: "فرمول ساخت",
+        items: [{ key: "boms", label: "فرمول ساخت (BOM)", list: "/boms", create: "/boms/new", icon: "layers" }],
+      },
+      {
         title: "عملیات",
         items: [
           { key: "goods", label: "کالا", list: "/goods", create: "/goods/new", icon: "tag" },
@@ -586,6 +590,46 @@ const RAW_MODULES: ModuleGroup[] = [
     ],
   },
   {
+    title: "مدیریت تولید",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [
+          { key: "cost-structure", label: "ساختار بهای تمام‌شده", list: "/cost-structure", icon: "tree", type: "operational" },
+          { key: "cost-collectors", label: "عامل جمع‌آوری هزینه‌ها", list: "/cost-collectors", create: "/cost-collectors/new", icon: "layers" },
+          { key: "cost-time-drivers", label: "مبناهای زمانی تسهیم", list: "/cost-time-drivers", create: "/cost-time-drivers/new", icon: "clock" },
+          { key: "production-time-sheets", label: "زمان‌بندی تولید", list: "/production-time-sheets", create: "/production-time-sheets/new", icon: "calendar" },
+          { key: "item-planning", label: "پارامترهای برنامه‌ریزی کالا", list: "/item-planning", create: "/item-planning/new", icon: "sliders" },
+        ],
+      },
+      {
+        title: "تولید",
+        items: [
+          { key: "production-stats", label: "آمار تولید", list: "/production-stats", create: "/production-stats/new", icon: "file" },
+          { key: "production-deliveries", label: "تحویل تولید", list: "/production-deliveries", create: "/production-deliveries/new", icon: "file" },
+        ],
+      },
+      {
+        title: "عملیات",
+        items: [
+          { key: "production-orders", label: "دستور تولید", list: "/production-orders", create: "/production-orders/new", icon: "file" },
+          { key: "wip-counts", label: "موجودی پای کار", list: "/wip-counts", create: "/wip-counts/new", icon: "file" },
+          { key: "production-costing", label: "محاسبه بهای تمام‌شده تولید", list: "/production-costing", icon: "ledger", type: "operational" },
+          { key: "mrp-runs", label: "برنامه‌ریزی نیاز مواد (MRP)", list: "/mrp-runs", create: "/mrp-runs/new", icon: "calendar" },
+        ],
+      },
+      {
+        title: "گزارش",
+        items: [
+          { key: "production-cost-report", label: "گزارش بهای تمام‌شده تولید", list: "/production-cost-report", icon: "ledger", type: "report" },
+          { key: "production-order-cost-report", label: "گزارش بهای تمام‌شده به تفکیک دستور", list: "/production-order-cost-report", icon: "ledger", type: "report" },
+          { key: "production-variance-report", label: "گزارش مصرف در برابر فرمول", list: "/production-variance-report", icon: "ledger", type: "report" },
+          { key: "production-plan-report", label: "گزارش برنامه در برابر انجام", list: "/production-plan-report", icon: "ledger", type: "report" },
+        ],
+      },
+    ],
+  },
+  {
     title: "کارتابل",
     subModules: [
       {
@@ -618,6 +662,8 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "attendance-factors", label: "عوامل تردد", list: "/attendance-factors", create: "/attendance-factors/new", icon: "sliders" },
           { key: "attendance-methods", label: "روش محاسبه", list: "/attendance-methods", create: "/attendance-methods/new", icon: "sliders" },
           { key: "attendance-time-bands", label: "بازه‌های زمانی", list: "/attendance-time-bands", create: "/attendance-time-bands/new", icon: "calendar" },
+          { key: "attendance-device-connections", label: "اتصال دستگاه حضور و غیاب", list: "/attendance-device-connections", create: "/attendance-device-connections/new", icon: "sliders" },
+          { key: "attendance-device-mappings", label: "نگاشت شناسه‌ی دستگاه", list: "/attendance-device-mappings", create: "/attendance-device-mappings/new", icon: "tag" },
           { key: "attendance-leave-types", label: "نوع مرخصی", list: "/attendance-leave-types", create: "/attendance-leave-types/new", icon: "tag" },
           { key: "attendance-request-types", label: "نوع درخواست", list: "/attendance-request-types", create: "/attendance-request-types/new", icon: "tag" },
           { key: "attendance-leave-entitlements", label: "قاعده‌ی استحقاق مرخصی", list: "/attendance-leave-entitlements", icon: "sliders", type: "operational" },
@@ -635,6 +681,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "attendance-calculation", label: "محاسبه تردد", list: "/attendance-calculation", icon: "file", type: "operational" },
           { key: "attendance-mission-reports", label: "گزارش ماموریت", list: "/attendance-mission-reports", create: "/attendance-mission-reports/new", icon: "file" },
           { key: "attendance-punches", label: "ورود و خروج", list: "/attendance-punches", create: "/attendance-punches/new", icon: "calendar" },
+          { key: "attendance-device-inbox", label: "ثبت‌های دریافتی از دستگاه", list: "/attendance-device-inbox", icon: "file", type: "operational" },
         ],
       },
       {
@@ -684,7 +731,7 @@ const NAV_KEY_TO_FORM_KEY: Record<string, string> = {
   services: "goods-items",
 };
 
-export function navItemFormKey(item: NavItem): string {
+function navItemFormKey(item: NavItem): string {
   return NAV_KEY_TO_FORM_KEY[item.key] ?? item.key;
 }
 

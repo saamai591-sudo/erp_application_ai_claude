@@ -132,6 +132,20 @@ import AssetAccountSettings from "./pages/AssetAccountSettings";
 import AssetCard from "./pages/AssetCard";
 import AssetGroupReview from "./pages/AssetGroupReview";
 import AssetReceipts from "./pages/AssetReceipts";
+import Boms from "./pages/Boms";
+import CostStructure from "./pages/CostStructure";
+import CostCollectors from "./pages/CostCollectors";
+import CostTimeDrivers from "./pages/CostTimeDrivers";
+import ProductionTimeSheets from "./pages/ProductionTimeSheets";
+import ItemPlanning from "./pages/ItemPlanning";
+import ProductionOrders from "./pages/ProductionOrders";
+import WipCounts from "./pages/WipCounts";
+import ProductionCosting from "./pages/ProductionCosting";
+import MrpRuns from "./pages/MrpRuns";
+import { ProductionOrderCostReport, ProductionVarianceReport, ProductionPlanReport } from "./pages/ProductionReports";
+import ProductionCostReview from "./pages/ProductionCostReview";
+import ProductionStats from "./pages/ProductionStats";
+import ProductionDeliveries from "./pages/ProductionDeliveries";
 import FixedAssets from "./pages/FixedAssets";
 import AssetPositions from "./pages/AssetPositions";
 import TaxMemories from "./pages/TaxMemories";
@@ -148,6 +162,9 @@ import AttendanceFactorResults from "./pages/AttendanceFactorResults";
 import AttendanceMethods from "./pages/AttendanceMethods";
 import AttendanceReview from "./pages/AttendanceReview";
 import AttendanceTimeBands from "./pages/AttendanceTimeBands";
+import AttendanceDeviceConnections from "./pages/AttendanceDeviceConnections";
+import AttendanceDeviceMappings from "./pages/AttendanceDeviceMappings";
+import AttendanceDeviceInbox from "./pages/AttendanceDeviceInbox";
 import AttendanceDayExceptions from "./pages/AttendanceDayExceptions";
 import AttendanceLeaveTypes from "./pages/AttendanceLeaveTypes";
 import AttendanceLeaveRequests from "./pages/AttendanceLeaveRequests";
@@ -674,6 +691,13 @@ export default function App() {
             <Route path="/attendance-day-exceptions" element={<AttendanceDayExceptions />} />
             <Route path="/attendance-day-exceptions/new" element={<AttendanceDayExceptions />} />
             <Route path="/attendance-day-exceptions/:id/edit" element={<AttendanceDayExceptions />} />
+            <Route path="/attendance-device-connections" element={<AttendanceDeviceConnections />} />
+            <Route path="/attendance-device-connections/new" element={<AttendanceDeviceConnections />} />
+            <Route path="/attendance-device-connections/:id/edit" element={<AttendanceDeviceConnections />} />
+            <Route path="/attendance-device-mappings" element={<AttendanceDeviceMappings />} />
+            <Route path="/attendance-device-mappings/new" element={<AttendanceDeviceMappings />} />
+            <Route path="/attendance-device-mappings/:id/edit" element={<AttendanceDeviceMappings />} />
+            <Route path="/attendance-device-inbox" element={<AttendanceDeviceInbox />} />
             <Route path="/attendance-time-bands" element={<AttendanceTimeBands />} />
             <Route path="/attendance-time-bands/new" element={<AttendanceTimeBands />} />
             <Route path="/attendance-time-bands/:id/edit" element={<AttendanceTimeBands />} />
@@ -814,6 +838,42 @@ export default function App() {
             <Route path="/asset-groups" element={<AssetGroups />} />
             <Route path="/asset-groups/new" element={<AssetGroups />} />
             <Route path="/asset-groups/:id/edit" element={<AssetGroups />} />
+            <Route path="/boms" element={<Boms />} />
+            <Route path="/boms/new" element={<Boms />} />
+            <Route path="/boms/:id/edit" element={<Boms />} />
+            <Route path="/cost-structure" element={<CostStructure />} />
+            <Route path="/cost-collectors" element={<CostCollectors />} />
+            <Route path="/cost-collectors/new" element={<CostCollectors />} />
+            <Route path="/cost-collectors/:id/edit" element={<CostCollectors />} />
+            <Route path="/cost-time-drivers" element={<CostTimeDrivers />} />
+            <Route path="/cost-time-drivers/new" element={<CostTimeDrivers />} />
+            <Route path="/cost-time-drivers/:id/edit" element={<CostTimeDrivers />} />
+            <Route path="/production-time-sheets" element={<ProductionTimeSheets />} />
+            <Route path="/production-time-sheets/new" element={<ProductionTimeSheets />} />
+            <Route path="/production-time-sheets/:id/edit" element={<ProductionTimeSheets />} />
+            <Route path="/item-planning" element={<ItemPlanning />} />
+            <Route path="/item-planning/new" element={<ItemPlanning />} />
+            <Route path="/item-planning/:id/edit" element={<ItemPlanning />} />
+            <Route path="/production-orders" element={<ProductionOrders />} />
+            <Route path="/production-orders/new" element={<ProductionOrders />} />
+            <Route path="/production-orders/:id/edit" element={<ProductionOrders />} />
+            <Route path="/wip-counts" element={<WipCounts />} />
+            <Route path="/wip-counts/new" element={<WipCounts />} />
+            <Route path="/wip-counts/:id/edit" element={<WipCounts />} />
+            <Route path="/mrp-runs" element={<MrpRuns />} />
+            <Route path="/mrp-runs/new" element={<MrpRuns />} />
+            <Route path="/mrp-runs/:id/edit" element={<MrpRuns />} />
+            <Route path="/production-costing" element={<ProductionCosting />} />
+            <Route path="/production-cost-report" element={<ProductionCostReview />} />
+            <Route path="/production-order-cost-report" element={<ProductionOrderCostReport />} />
+            <Route path="/production-stats" element={<ProductionStats />} />
+            <Route path="/production-stats/new" element={<ProductionStats />} />
+            <Route path="/production-stats/:id/edit" element={<ProductionStats />} />
+            <Route path="/production-deliveries" element={<ProductionDeliveries />} />
+            <Route path="/production-deliveries/new" element={<ProductionDeliveries />} />
+            <Route path="/production-deliveries/:id/edit" element={<ProductionDeliveries />} />
+            <Route path="/production-variance-report" element={<ProductionVarianceReport />} />
+            <Route path="/production-plan-report" element={<ProductionPlanReport />} />
             <Route path="/asset-receipts" element={<AssetReceipts />} />
             <Route path="/asset-receipts/new" element={<AssetReceipts />} />
             <Route path="/asset-receipts/:id/edit" element={<AssetReceipts />} />

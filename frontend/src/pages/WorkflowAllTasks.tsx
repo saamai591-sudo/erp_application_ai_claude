@@ -7,10 +7,10 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import type { TaskRow } from "./MyTasks";
+import { WORKFLOW_TASK_STATUS_FA } from "../lib/enumLabels";
 
 // کارتابل › گزارش › «همه‌ی کارها»: همه‌ی کارهای سیستم (برای مدیر). دابل‌کلیک = جزئیات کار (و واگذاری به کاربر دیگر با مجوز «واگذاری»).
 
-const STATUS_FA: Record<string, string> = { OPEN: "باز", CLAIMED: "برداشته‌شده", DONE: "انجام‌شده", SKIPPED: "ردشده", CANCELLED: "لغو" };
 const dt = (iso: string | null) => (iso ? `${formatJalaliDate(iso)} ${toFaDigits(new Date(iso).toTimeString().slice(0, 5))}` : "");
 
 export default function WorkflowAllTasks() {
@@ -36,7 +36,7 @@ export default function WorkflowAllTasks() {
         columns={[
           { header: "سند", ...s((r) => r.rootTitle) },
           { header: "مرحله", ...s((r) => r.stepTitle), width: "180px" },
-          { header: "وضعیت", ...s((r) => STATUS_FA[r.status] ?? r.status), width: "110px" },
+          { header: "وضعیت", ...s((r) => WORKFLOW_TASK_STATUS_FA[r.status] ?? r.status), width: "110px" },
           { header: "برداشته‌شده توسط", ...s((r) => r.claimedByName), width: "150px" },
           { header: "مهلت", ...s((r) => dt(r.dueAt)), width: "150px" },
           { header: "عقب‌افتاده", ...s((r) => (r.overdue ? "بله" : "")), width: "90px" },

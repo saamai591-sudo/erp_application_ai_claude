@@ -12,7 +12,7 @@ import { showError } from "../lib/toast";
 import { useTabs } from "../lib/TabsContext";
 import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState } from "../lib/usePersistedState";
-import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
+import { currentJalaliYearMonth } from "../lib/payrollLabels";
 import { useCalcTypes } from "../lib/useCalcTypes";
 import { WorkMonthPicker } from "../components/WorkMonthPicker";
 import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";

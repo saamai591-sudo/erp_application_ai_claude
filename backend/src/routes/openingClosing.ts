@@ -2,10 +2,11 @@ import { Router } from "express";
 import { auditRoute } from "../middleware/auditEvent";
 import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
-import { computeFullAccountCode } from "../utils/accountCode";
 import { getRequestContext } from "../lib/requestContext";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { getBaseCurrency } from "../services/baseCurrencyService";
+import { rootNatureGroup } from "../utils/accountCode";
 
 const FORM = findFormPrefix("opening-closing");
 
@@ -20,17 +21,6 @@ async function currentFiscalPeriod() {
     if (period) return period;
   }
   return prisma.fiscalPeriod.findFirst({ orderBy: { toDate: "desc" } });
-}
-
-async function rootNatureGroup(accountId: number, byId: Map<number, any>): Promise<string | null> {
-  let cur = byId.get(accountId);
-  while (cur) {
-    if (!cur.parentId) return cur.natureGroup || null;
-    const parent = byId.get(cur.parentId);
-    if (!parent) return cur.natureGroup || null;
-    cur = parent;
-  }
-  return null;
 }
 
 router.get("/", can(`${FORM}.view`), async (_req, res) => {
@@ -179,8 +169,7 @@ async function issueClosing(e: { id: number; fiscalPeriodId: number; description
   const docType = await prisma.documentType.findFirst({ where: { systemKey: "CLOSING" } });
   if (!docType) throw new Error("نوع سند «اختتامیه» در سیستم تعریف نشده است");
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   // کنترل: تمامی اسناد دوره مالی جاری باید در وضعیت «تایید» باشند
   const notApprovedCount = await prisma.journalEntry.count({

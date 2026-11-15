@@ -15,7 +15,7 @@ import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
-export const GOODS_TYPE_FA: Record<string, string> = {
+const GOODS_TYPE_FA: Record<string, string> = {
   RAW_MATERIAL: "مواد اولیه",
   SEMI_FINISHED: "نیمه‌ساخته",
   PRODUCT: "محصول",
@@ -50,7 +50,6 @@ function GroupList() {
   const cacheKey = "/accounting-groups";
   const [items, setItems] = usePersistedState<AccountingGroup[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/accounting-groups").then(setItems).catch((e) => setError(e.message));

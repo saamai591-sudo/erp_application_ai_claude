@@ -4,17 +4,13 @@ import { nextSerialNumber } from "../utils/coding";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { displayDate } from "../utils/dateDisplay";
+import { trimOrNull } from "../utils/inputParse";
 
 // منابع انسانی › شغل: کد (خودکار: آخرین + ۱)، عنوان، کد تامین اجتماعی و سه متن (شرح شغل، مهارت‌های تخصصی، ویژگی‌های فردی).
 // هر پست شغل‌های مورد نیازش را با تعداد نفرات دارد (PositionJob) و کارمند در انتصاب شغلش را از همان‌ها انتخاب می‌کند.
 
 const FORM = findFormPrefix("jobs");
 const router = Router();
-
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
 
 class JobErr extends Error {}
 
@@ -74,14 +70,14 @@ router.get("/jobs/:id/usage", can(`${FORM}.view`), async (req, res) => {
 });
 
 function cleanBody(b: any) {
-  const title = str(b.title);
+  const title = trimOrNull(b.title);
   if (!title) throw new JobErr("عنوان شغل الزامی است");
   return {
     title,
-    socialSecurityCode: str(b.socialSecurityCode),
-    description: str(b.description),
-    specializedSkills: str(b.specializedSkills),
-    personalTraits: str(b.personalTraits),
+    socialSecurityCode: trimOrNull(b.socialSecurityCode),
+    description: trimOrNull(b.description),
+    specializedSkills: trimOrNull(b.specializedSkills),
+    personalTraits: trimOrNull(b.personalTraits),
   };
 }
 

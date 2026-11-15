@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { trimOrNull } from "../utils/inputParse";
 
 // منابع انسانی › پرسنلی › سوابق تاریخ‌دار (تحصیلی، ایثارگری، تاهل): هر کدام یک فرم مستقل (فهرست + فرم) که به کارمند لینک می‌شود.
 // مقدار معتبر هر تاریخ = آخرین سابقه با تاریخ اعمال ≤ آن تاریخ (services/employeeRecordService.ts)؛ هر کارمند همیشه حداقل یک سابقه‌ی هر نوع دارد.
@@ -11,10 +12,6 @@ class RecError extends Error {}
 
 const MARITAL = ["SINGLE", "MARRIED", "DIVORCED", "WIDOWED"];
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
-const str = (v: unknown) => {
-  const t = typeof v === "string" ? v.trim() : "";
-  return t || null;
-};
 function parseDay(v: unknown): Date {
   if (!v) throw new RecError("تاریخ اعمال الزامی است");
   const d = new Date(`${String(v)}T00:00:00.000Z`);
@@ -47,7 +44,7 @@ const KINDS: Kind[] = [
       const lv = await prisma.educationLevel.findUnique({ where: { id } });
       if (!lv) throw new RecError("مدرک تحصیلی یافت نشد");
       await prisma.educationLevel.update({ where: { id }, data: { hasTransactions: true } });
-      return { educationLevelId: id, field: str(b.field) };
+      return { educationLevelId: id, field: trimOrNull(b.field) };
     },
     out: (r) => ({ educationLevelId: r.educationLevelId, educationLevelTitle: r.educationLevel?.title ?? null, field: r.field }),
   },
@@ -136,7 +133,7 @@ for (const k of KINDS) {
       }
       const effectiveDate = parseDay(b.effectiveDate);
       const data = await k.build(b);
-      const created = await m().create({ data: { employeeId, effectiveDate, note: str(b.note), ...data } });
+      const created = await m().create({ data: { employeeId, effectiveDate, note: trimOrNull(b.note), ...data } });
       res.status(201).json({ id: created.id });
     } catch (e: any) {
       if (e instanceof RecError) return res.status(400).json({ error: e.message });
@@ -155,7 +152,7 @@ for (const k of KINDS) {
       assertRecordNotStale(existing.updatedAt, b.updatedAt, `این ${k.label}`);
       const effectiveDate = parseDay(b.effectiveDate);
       const data = await k.build(b);
-      await m().update({ where: { id }, data: { effectiveDate, note: str(b.note), ...data } });
+      await m().update({ where: { id }, data: { effectiveDate, note: trimOrNull(b.note), ...data } });
       res.json({ ok: true });
     } catch (e: any) {
       if (e instanceof RecError) return res.status(400).json({ error: e.message });

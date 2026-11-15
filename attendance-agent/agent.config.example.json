@@ -1,0 +1,28 @@
+{
+  "server": {
+    "url": "http://192.168.1.10:4000/api",
+    "token": "atd_توکن-اتصال-از-فرم-ERP"
+  },
+  "db": {
+    "type": "mssql",
+    "host": "SERVER\\INSTANCE",
+    "database": "TimeClock",
+    "user": "erp_readonly",
+    "password": "رمز"
+  },
+  "source": {
+    "table": "dbo.Traffic",
+    "columns": {
+      "userId": "UserID",
+      "date": "TDate",
+      "time": "TTime",
+      "device": "DeviceName",
+      "cursor": "ID"
+    },
+    "dateFormat": "jalali",
+    "cursorType": "number",
+    "initialCursor": 0,
+    "where": ""
+  },
+  "sync": { "intervalSeconds": 300, "batchSize": 2000 }
+}

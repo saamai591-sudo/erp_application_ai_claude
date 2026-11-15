@@ -209,7 +209,7 @@ export async function completeTask(tx: Tx, taskId: number, p: { userId: number |
 }
 
 /** notifyText: اگر داده شود به مسئولان (و برداشتنده‌ی) هر کار بازِ لغوشده اطلاعیه‌ی «کار لغو شد» می‌رود */
-export async function cancelInstance(tx: Tx, instanceId: number, actorId: number | null, reason: string, notifyText?: string) {
+async function cancelInstance(tx: Tx, instanceId: number, actorId: number | null, reason: string, notifyText?: string) {
   const open = await tx.workflowTask.findMany({ where: { instanceId, status: { in: ["OPEN", "CLAIMED"] } }, select: { id: true, stepId: true, claimedById: true, step: { select: { title: true } } } });
   const creator = notifyText ? (await tx.workflowInstance.findUnique({ where: { id: instanceId }, select: { creatorUserId: true } }))?.creatorUserId ?? null : null;
   const now = new Date();
@@ -226,7 +226,7 @@ export async function cancelInstance(tx: Tx, instanceId: number, actorId: number
 }
 
 /** کاربران فعالِ مسئول یک مرحله (کاربر ثابت + اعضای نقش + ثبت‌کننده‌ی سند) */
-export async function stepUserIds(stepId: number, creatorUserId: number | null): Promise<number[]> {
+async function stepUserIds(stepId: number, creatorUserId: number | null): Promise<number[]> {
   const as = await prisma.workflowStepAssignee.findMany({ where: { stepId }, select: { kind: true, userId: true, roleId: true } });
   const ids = new Set<number>();
   const roleIds: number[] = [];

@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { roundToCurrencyDecimals, fromBaseCurrencyAmount } from "../utils/currencyConversion";
 import { EffectiveSettings } from "../services/goodsAccountingSettingService";
@@ -11,6 +10,8 @@ import { findIssuingDocType } from "../services/documentTypeService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { getBaseCurrency } from "../services/baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 const FORM = findFormPrefix("purchase-returns");
 
@@ -28,16 +29,7 @@ const FORM = findFormPrefix("purchase-returns");
 
 const router = Router();
 
-const partyTitle = (p: any): string => (p?.detailTitle as string) || (p?.category === "LEGAL" ? p.name || "" : `${p?.firstName || ""} ${p?.lastName || ""}`.trim());
 const n = (v: any) => Number(v ?? 0);
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
 
 interface ComputedLine {
   sourceInventoryLineId: number;
@@ -66,8 +58,7 @@ async function computeLines(sourceIds: number[], excludeReturnId?: number) {
   if (!Array.isArray(sourceIds) || sourceIds.length === 0) throw new Error("برگشت خرید باید حداقل یک ردیف داشته باشد");
   if (new Set(sourceIds).size !== sourceIds.length) throw new Error("یک ردیف برگشت از خرید را فقط یک‌بار می‌توان انتخاب کرد");
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   const srcs = await prisma.inventoryDocumentLine.findMany({
     where: { id: { in: sourceIds }, document: { documentType: "SUPPLIER_RETURN" } },
@@ -296,7 +287,7 @@ interface Body {
 async function buildData(body: Body, excludeReturnId?: number) {
   const date = new Date(body.date);
   if (isNaN(date.getTime())) throw new Error("تاریخ نامعتبر است");
-  const fiscalPeriod = await resolveFiscalPeriod(date);
+  const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
   const party = await prisma.party.findUnique({ where: { id: Number(body.partyId) } });
   if (!party) throw new Error("طرف مقابل یافت نشد");
   const { lines, invoice } = await computeLines((body.lines ?? []).map((l) => Number(l.sourceInventoryLineId)), excludeReturnId);
@@ -370,7 +361,7 @@ router.delete("/purchase-returns/:id", can(`${FORM}.delete`), async (req, res) =
   if (!existing) return res.status(404).json({ error: "برگشت خرید یافت نشد" });
   if (existing.journalEntryId) return res.status(400).json({ error: "برای این برگشت خرید سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   try {
-    await resolveFiscalPeriod(existing.date);
+    await resolveDocumentFiscalPeriod(existing.date);
     await prisma.purchaseReturn.delete({ where: { id } });
     res.status(204).send();
   } catch (e: any) {
@@ -390,8 +381,7 @@ export async function issuePurchaseReturnJournalHandler(req: any, res: any) {
   if (!ret) return res.status(404).json({ error: "برگشت خرید یافت نشد" });
   if (ret.journalEntryId) return res.status(400).json({ error: "قبلاً برای این برگشت خرید سند حسابداری صادر شده است" });
   try {
-    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const baseCurrency = await getBaseCurrency();
     const fxRate = n(ret.fxRate);
     const invoice = ret.purchaseInvoice;
     const partyDetailCode = ret.party.detailCode;

@@ -9,7 +9,7 @@ import { nextSerialNumber } from "../utils/coding";
 
 export class BarcodeInterpretationError extends Error {}
 
-export const BARCODE_KINDS = ["ITEM_CODE", "QUANTITY_INTEGER", "QUANTITY_DECIMAL", "BARCODE", "AMOUNT", "FIXED", "SERIAL", "BATCH"] as const;
+const BARCODE_KINDS = ["ITEM_CODE", "QUANTITY_INTEGER", "QUANTITY_DECIMAL", "BARCODE", "AMOUNT", "FIXED", "SERIAL", "BATCH"] as const;
 export type BarcodeKind = (typeof BARCODE_KINDS)[number];
 const KIND_TITLE: Record<BarcodeKind, string> = {
   ITEM_CODE: "کد کالا",

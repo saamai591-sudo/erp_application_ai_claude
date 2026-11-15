@@ -19,6 +19,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
 import { useTabs } from "../lib/TabsContext";
 import { fetchSelectedFiscalPeriod, defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { PlusIcon } from "../components/icons";
 
 // «استرداد دریافت تضمین» / «استرداد پرداخت تضمین» (مدیریت خزانه › تضامین): فقط چک و سفته. بعد از انتخاب طرف حساب و تاریخ، ابزارهای قابل استرداد
 // (از سندهای دارای سند حسابداری) با دکمه‌ی + انتخاب می‌شوند. سند حسابداری = معکوس سند اصلی (services/guaranteeReturnJournalService.ts).
@@ -34,14 +35,6 @@ interface PartyOption { id: number; detailCode: string; detailTitle: string; isA
 interface Instr { instrumentId: number; documentNumber: number; documentDate: string; type: string; number: string; guaranteeTypeTitle: string; dueDate: string | null; amount: number }
 interface Pickable { id: number; documentNumber: number; documentDate: string; type: string; number: string; guaranteeTypeTitle: string; dueDate: string | null; amount: number }
 interface ListRow { id: number; number: number; date: string; partyTitle: string; description: string; instrumentCount: number; totalAmount: number }
-
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 export default function GuaranteeReturns({ direction }: { direction: Direction }) {
   const location = useLocation();

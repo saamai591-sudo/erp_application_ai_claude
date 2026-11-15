@@ -12,6 +12,7 @@ import { showError, showToast } from "../lib/toast";
 import { usePermissions } from "../lib/usePermissions";
 import { WorkflowTaskAction } from "../components/WorkflowTaskAction";
 import { CloseFollowUpDialog, type FollowUpInfo } from "../components/QuoteFollowUp";
+import { WORKFLOW_TASK_STATUS_FA } from "../lib/enumLabels";
 
 // کارتابل › «کارهای من» (دسکتاپ و موبایل): فهرست کارها و جزئیات هر کار — خلاصه‌ی فقط‌خواندنی سند، تاریخچه، پیوست‌ها و «برداشتن / انجام شد».
 // مرحله‌ی دستی: توضیح + حداقل یک مدرک (تصویر/PDF تا ۵ مگابایت) الزامی است؛ مرحله‌ی خودکار با ثبت سند بسته می‌شود. قواعد در سرور (workflowTaskService).
@@ -41,7 +42,6 @@ export interface TaskRow {
   canComplete: boolean;
 }
 
-const STATUS_FA: Record<string, string> = { OPEN: "باز", CLAIMED: "برداشته‌شده", DONE: "انجام‌شده", SKIPPED: "ردشده", CANCELLED: "لغو" };
 const SCOPES: { key: string; label: string }[] = [
   { key: "mine", label: "کارهای من" },
   { key: "claimed", label: "برداشته‌شده توسط من" },
@@ -147,7 +147,7 @@ function TaskList() {
             <button key={t.id} type="button" className="card mytask-card" onClick={() => navigate(`/my-tasks/${t.id}`)} style={{ textAlign: "start", padding: 12, cursor: "pointer", border: t.overdue ? "1px solid var(--danger, #c0392b)" : undefined }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                 <b>{t.stepTitle}</b>
-                <span style={{ opacity: 0.8 }}>{STATUS_FA[t.status] ?? t.status}{t.claimedByName && t.status === "CLAIMED" ? ` — ${t.claimedByName}` : ""}</span>
+                <span style={{ opacity: 0.8 }}>{WORKFLOW_TASK_STATUS_FA[t.status] ?? t.status}{t.claimedByName && t.status === "CLAIMED" ? ` — ${t.claimedByName}` : ""}</span>
               </div>
               <div style={{ marginTop: 4 }}>{t.rootTitle}</div>
               {t.progress && <ProgressBar p={t.progress} />}
@@ -251,7 +251,7 @@ function TaskDetail({ taskId }: { taskId: number }) {
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
         <button type="button" className="btn secondary" onClick={() => navigate("/my-tasks")}>بازگشت</button>
         <h3 style={{ margin: 0 }}>{d.stepTitle}</h3>
-        <span style={{ opacity: 0.8 }}>{STATUS_FA[d.status] ?? d.status}</span>
+        <span style={{ opacity: 0.8 }}>{WORKFLOW_TASK_STATUS_FA[d.status] ?? d.status}</span>
       </div>
       <div className="card" style={{ padding: 12, marginBottom: 8 }}>
         <div><b>{d.rootTitle}</b></div>

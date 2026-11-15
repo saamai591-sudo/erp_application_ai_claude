@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertWithinCurrentFiscalPeriod, assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { candidatesForBasisType, rowBasisTypeOf, BasisType, RowBasisType } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, rowBasisTypeOf, BasisType, RowBasisType, BASIS_FIELD } from "../services/paymentBasisCandidates";
 import { resolvePaymentSubjectAccount } from "../services/paymentSubjectAccount";
 import { remainingOfPettyCashPayment, pickablePettyCashPayments } from "../services/pettyCashSummaryRemaining";
 import { issuePettyCashSummaryJournalEntry, revertPettyCashSummaryJournalEntry } from "../services/pettyCashSummaryJournalEntryService";
@@ -16,13 +16,6 @@ import { findFormPrefix } from "../authz/registry";
 // «صدور سند حسابداری» جداگانه سند واقعی را می‌سازد (services/pettyCashSummaryJournalEntryService.ts).
 // هر ردیف گرید به یک PettyCashPayment ثبت‌شده وصل است؛ نوع پرداخت/سند مبنای هر ردیف مستقل از پرداخت اصلی قابل تغییر
 // است («تغییر نوع پرداخت» — کاملاً سمت کلاینت، چون کل سند یک‌جا با PUT ذخیره می‌شود، هم‌الگوی سند حسابداری/پرداخت).
-
-const BASIS_FIELD: Record<Exclude<RowBasisType, "NONE">, "purchaseInvoiceId" | "servicePurchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
-  PURCHASE_INVOICE: "purchaseInvoiceId",
-  SERVICE_PURCHASE_INVOICE: "servicePurchaseInvoiceId",
-  SALES_INVOICE: "salesInvoiceId",
-  PURCHASE_ORDER: "purchaseOrderId",
-};
 
 const FORM = findFormPrefix("petty-cash-summaries");
 const router = Router();
@@ -117,7 +110,6 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
     const rowBasisType = rowBasisTypeOf(basisType, ids);
     let purchaseInvoice: any = null; // فاکتور خرید کالا یا خدمات (هر دو purchaseTypeId/currencyId/fxRate دارند)
     let salesInvoice: any = null;
-    let purchaseOrder: any = null;
     if (basisType === "NONE") {
       if (ids.purchaseInvoiceId || ids.servicePurchaseInvoiceId || ids.salesInvoiceId || ids.purchaseOrderId) {
         throw new Error(`ردیف ${n}: نوع پرداخت انتخاب‌شده «بدون مبنا» است؛ سند مبنا نباید انتخاب شود`);
@@ -136,7 +128,6 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
       if (rowBasisType === "PURCHASE_INVOICE") purchaseInvoice = await prisma.purchaseInvoice.findUnique({ where: { id: basisId } });
       if (rowBasisType === "SERVICE_PURCHASE_INVOICE") purchaseInvoice = await prisma.servicePurchaseInvoice.findUnique({ where: { id: basisId } });
       if (basisType === "SALES_INVOICE") salesInvoice = await prisma.salesInvoice.findUnique({ where: { id: basisId } });
-      if (basisType === "PURCHASE_ORDER") purchaseOrder = await prisma.purchaseOrder.findUnique({ where: { id: basisId } });
     }
 
     const resolved = await resolvePaymentSubjectAccount(paymentType, { purchaseInvoice, salesInvoice });

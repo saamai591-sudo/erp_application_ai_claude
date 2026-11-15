@@ -52,7 +52,7 @@ interface Found {
 const ROLE_FA: Record<string, string> = { customer: "مشتری", supplier: "تامین‌کننده", employee: "کارمند" };
 
 /** عنوان تفصیل پیش‌فرض از نام (تا وقتی کاربر دستی ویرایشش نکرده) */
-export function suggestDetailTitle(p: Pick<QuickParty, "category" | "firstName" | "lastName" | "name">): string {
+function suggestDetailTitle(p: Pick<QuickParty, "category" | "firstName" | "lastName" | "name">): string {
   return (p.category === "INDIVIDUAL" ? `${p.firstName} ${p.lastName}` : p.name).replace(/\s+/g, " ").trim();
 }
 

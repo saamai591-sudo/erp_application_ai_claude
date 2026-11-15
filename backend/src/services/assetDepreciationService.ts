@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
-import { AssetError } from "./assetError";
+import { AssetError, assetBulkFail } from "./assetError";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { findIssuingDocType } from "./documentTypeService";
 import { assetAccountOf } from "./assetAccountSettingService";
@@ -25,11 +25,6 @@ const DAY_MS = 86400000;
 export const addDays = (d: Date, n: number) => new Date(day(d) + n * DAY_MS);
 export const daysBetween = (from: Date, to: Date) => Math.round((day(to) - day(from)) / DAY_MS) + 1;
 
-function bulkFail(summary: string, details: Record<string, unknown>[]): never {
-  const err = new AssetError(summary);
-  err.details = details;
-  throw err;
-}
 const fail = (m: string): never => {
   throw new AssetError(m);
 };
@@ -186,7 +181,7 @@ export async function calculateDepreciation(reportingPeriodId: number, userId: n
     for (const sg of segs) itemsToCreate.push({ assetId: a.id, positionId: sg.positionId, assetGroupId: a.assetGroupId, fromDate: sg.from, toDate: sg.to, days: sg.days, amount: sg.amount, costCenterId: sg.costCenterId, projectId: sg.projectId });
     total = total.add(r.amount);
   }
-  if (problems.length) bulkFail("محاسبه‌ی استهلاک انجام نشد", problems);
+  if (problems.length) assetBulkFail("محاسبه‌ی استهلاک انجام نشد", problems);
 
   return prisma.$transaction(
     async (tx) => {
@@ -247,7 +242,7 @@ export async function issueDepreciationEntry(reportingPeriodId: number) {
     if (!accumulated) problems.push({ "گروه": g?.title ?? String(gid), "علت": "حساب «استهلاک انباشته» تعریف نشده است" });
     groupAccounts.set(gid, { expense, accumulated, title: g?.title ?? "" });
   }
-  if (problems.length) bulkFail("صدور سند استهلاک انجام نشد", problems);
+  if (problems.length) assetBulkFail("صدور سند استهلاک انجام نشد", problems);
 
   type Acc = { accountId: number; d1: string | null; d2: string | null; d3: string | null; amount: Prisma.Decimal };
   const debit = new Map<string, Acc>();
@@ -257,8 +252,7 @@ export async function issueDepreciationEntry(reportingPeriodId: number) {
     let ok = true;
     [account.detailType1, account.detailType2, account.detailType3].forEach((dt: any, i: number) => {
       if (!dt) return;
-      if (dt.code === 9) d[i] = item.asset.detailCode;
-      else if (dt.code === 2) d[i] = costCenters.get(item.costCenterId) ?? null;
+      if (dt.code === 2) d[i] = costCenters.get(item.costCenterId) ?? null;
       else if (dt.code === 8) {
         d[i] = item.projectId ? projects.get(item.projectId) ?? null : null;
         if (!d[i]) { problems.push({ "پلاک": item.asset.detailCode, "علت": `${ctx}: حساب «${account.title}» تفصیل پروژه دارد ولی موقعیت دارایی پروژه ندارد` }); ok = false; }
@@ -279,7 +273,7 @@ export async function issueDepreciationEntry(reportingPeriodId: number) {
     if (dd) add(debit, ga.expense.account.id, dd, it.amount);
     if (cd) add(credit, ga.accumulated.account.id, cd, it.amount);
   }
-  if (problems.length) bulkFail("صدور سند استهلاک انجام نشد", problems);
+  if (problems.length) assetBulkFail("صدور سند استهلاک انجام نشد", problems);
 
   const description = `بابت استهلاک دارایی‌های ثابت دوره‌ی ${run.reportingPeriod.title} (${formatJalaliDateForMessage(run.reportingPeriod.fromDate)} تا ${formatJalaliDateForMessage(run.reportingPeriod.toDate)})`;
   const toLine = (x: Acc, isDebit: boolean): IssueLineInput => ({

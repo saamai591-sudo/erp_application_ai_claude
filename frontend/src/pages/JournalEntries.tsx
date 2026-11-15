@@ -17,7 +17,8 @@ import { LineGridToolbar } from "../components/LineGridToolbar";
 import { useLineGridBase } from "../lib/useLineGridBase";
 import type { ExportColumn } from "../lib/gridExport";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
-import { formatJalaliDate, jalaliToGregorianIso } from "../lib/formatDate";
+import { formatJalaliDate } from "../lib/formatDate";
+import { issuingSystemLabel } from "../lib/issuingSystemLabels";
 import { getSavedFiscalPeriodId } from "../lib/userSettings";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
@@ -28,6 +29,8 @@ import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { useDetailLevels } from "../lib/useDetailLevels";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { CheckIcon, UndoIcon } from "../components/icons";
+import { JOURNAL_STATUS_FA } from "../lib/enumLabels";
 
 interface DocType { id: number; title: string; isSystem: boolean; systemKey: string | null }
 interface Level { id: number; order: number; title: string }
@@ -70,21 +73,12 @@ interface Entry {
   description: string | null;
   status: "DRAFT" | "REVIEW" | "APPROVED";
   documentType: { title: string };
+  issuingSystem: string;
   totalDebit: number;
   totalCredit: number;
   isManual: boolean;
   sources?: { id: number; label: string; path: string }[];
   lines?: EntryLine[];
-}
-
-const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
-
-/** برای ستون‌های تاریخ در ورود از اکسل: اگر شمسی وارد شده (سال کوچک‌تر از ۱۷۰۰) به میلادی تبدیل می‌کند، وگرنه همان مقدار میلادی را برمی‌گرداند */
-function resolveImportDate(raw: string): string {
-  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch && Number(isoMatch[1]) >= 1700) return raw;
-  const converted = jalaliToGregorianIso(raw);
-  return converted || raw;
 }
 
 export default function JournalEntries() {
@@ -105,6 +99,7 @@ const SERVER_FIELD_MAP: Record<string, string> = {
   "تاریخ": "date",
   "شماره عطف": "referenceNumber",
   "نوع سند": "documentTypeTitle",
+  "سیستم صادرکننده": "issuingSystem",
   "شرح": "description",
   "وضعیت": "status",
 };
@@ -121,7 +116,6 @@ function EntryList() {
   const [fiscalPeriodId, setFiscalPeriodId] = useState<string>("");
   const [fiscalPeriodResolved, setFiscalPeriodResolved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   // شناسه‌ی دوره مالی فعال فقط یک‌بار در ابتدا مشخص می‌شود (از تنظیمات کاربر یا آخرین دوره)
   useEffect(() => {
@@ -293,13 +287,14 @@ function EntryList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "شماره عطف", render: (r) => r.referenceNumber ?? "—", filterType: "number", filterValue: (r) => r.referenceNumber },
           { header: "نوع سند", render: (r) => r.documentType?.title, filterType: "string", filterValue: (r) => r.documentType?.title },
+          { header: "سیستم صادرکننده", render: (r) => issuingSystemLabel(r.issuingSystem), filterType: "string", filterValue: (r) => issuingSystemLabel(r.issuingSystem) },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           // این دو ستون مقدار محاسبه‌شده (جمع ردیف‌های سند) هستند؛ فیلتر/مرتب‌سازی سمت سرور برایشان
           // پشتیبانی نمی‌شود، پس عمداً بدون filterType/filterValue تعریف شده‌اند (فقط نمایش مقدار همان
           // صفحه) — totalValue برای جمع پای گرید کافی است، بدون فعال‌کردن آیکن فیلتر
           { header: "جمع بدهکار", render: (r) => formatAmountFa(r.totalDebit), decimal: true, totalValue: (r) => r.totalDebit },
           { header: "جمع بستانکار", render: (r) => formatAmountFa(r.totalCredit), decimal: true, totalValue: (r) => r.totalCredit },
-          { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          { header: "وضعیت", render: (r) => <span className="badge">{JOURNAL_STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => JOURNAL_STATUS_FA[r.status] },
         ]}
         rows={items}
         edit={{ path: (r) => `/journal-entries/${r.id}/edit` }}
@@ -354,23 +349,6 @@ function RenumberIcon() {
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 const LINES_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_LINES_PAGE_SIZE = 25;
 
@@ -385,7 +363,7 @@ function EntryForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
-  const [levels, setLevels] = useState<Level[]>([]);
+  const [, setLevels] = useState<Level[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [detailOptions, setDetailOptions] = useState<Record<number, { code: string; title: string }[]>>({});
@@ -799,7 +777,7 @@ function EntryForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>وضعیت</label>
-            <div><span className="badge">{STATUS_FA[entryMeta?.status || "DRAFT"] || entryMeta?.status}</span></div>
+            <div><span className="badge">{JOURNAL_STATUS_FA[entryMeta?.status || "DRAFT"] || entryMeta?.status}</span></div>
           </div>
           <div className="form-field">
             <label>تاریخ سند<RequiredMark /></label>

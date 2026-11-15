@@ -16,7 +16,7 @@ const FIELD_NO_TO_KEY: Record<string, string> = {
 };
 
 /** عنوان فارسی فیلدها به‌ازای کلید JSON (سند RC_IITP.IS V7.9) */
-export const TAX_FIELD_TITLES: Record<string, string> = {
+const TAX_FIELD_TITLES: Record<string, string> = {
   taxid: "شماره منحصر به فرد مالیاتی", indatim: "تاریخ و زمان صدور صورتحساب", indati2m: "تاریخ و زمان ثبت صورتحساب", inty: "نوع صورتحساب",
   inno: "سریال صورتحساب داخلی حافظه مالیاتی", irtaxid: "شماره منحصر به فرد مالیاتی صورتحساب مرجع", inp: "الگوی صورتحساب", ins: "موضوع صورتحساب",
   tins: "شماره اقتصادی فروشنده", tob: "نوع شخص خریدار", bid: "شناسه ملی/شماره ملی/کد فراگیر خریدار", tinb: "شماره اقتصادی خریدار", sbc: "کد شعبه فروشنده",
@@ -74,19 +74,3 @@ export function explainTaxCode(code: string, serverMessage?: string): ExplainedT
   return { code: c, severity: st === "1" ? "warning" : "error", field, fieldTitle, message: serverMessage ? `${head} (پیام سامانه: ${serverMessage})` : head };
 }
 
-/** خطاهای لایه‌ی انتقال/احراز هویت (فقط پرتکرارها؛ پیام اصلی سامانه همیشه همراه نمایش داده می‌شود) */
-const TRANSPORT_HINTS: Record<string, string> = {
-  "4101": "توکن Bearer ارسال نشده است",
-  "4130": "شناسه حافظه یا توکن معتبر نیست",
-  "4134": "امضای توکن یا گواهی امضا معتبر نیست",
-  "4143": "در هر درخواست بیش از ۱۰۰۰ صورتحساب مجاز نیست",
-  "4162": "شناسه درخواست (requestTraceId) معتبر نیست",
-  "4163": "شناسه درخواست تکراری است",
-  "4164": "بازه‌ی استعلام نباید بیش از یک هفته باشد",
-  "4200": "اجازه‌ی ارسال بسته برای این شناسه یکتا را ندارید",
-  "5199": "خطای غیرمنتظره‌ی سامانه — کمی بعد دوباره تلاش کنید",
-};
-export function explainTransportCode(code: string, serverMessage?: string): string {
-  const hint = TRANSPORT_HINTS[code];
-  return [hint, serverMessage].filter(Boolean).join(" — ") || `خطای ارتباط با سامانه (کد ${code})`;
-}

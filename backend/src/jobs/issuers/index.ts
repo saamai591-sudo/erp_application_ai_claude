@@ -26,6 +26,8 @@ import { issuePurchaseInvoiceJournalHandler } from "../../routes/purchaseInvoice
 import { issueServicePurchaseInvoiceJournalHandler } from "../../routes/servicePurchaseInvoices";
 import { issuePurchaseReturnJournalHandler } from "../../routes/purchaseReturns";
 import type { IssueOutcome, IssuerCandidate, IssuerRange, JournalIssuer } from "./types";
+import { partyTitle } from "../../utils/partyTitle";
+import { invokeRouteHandler } from "../../utils/internalHandler";
 
 // فهرست فرم‌هایی که کار «صدور سند حسابداری» می‌تواند برایشان سند بزند. ترتیب این آرایه ترتیب نمایش گروه‌ها در فرم تنظیمات و ترتیب تساوی هنگام
 // ادغام بر اساس تاریخ است. نیاورده‌شده‌ها (و دلیلشان): صدور سند تحصیل دارایی (تاریخ سند را کاربر هنگام صدور تعیین می‌کند)، حقوق (ماه‌محور و دسته‌ای)،
@@ -39,19 +41,7 @@ const outcomeOf = (r: any): IssueOutcome => ({ number: num(r?.number), reference
 
 /** فراخواننده‌ی handlerهای مسیر (فاکتورها/برگشت‌ها) با req/res ساختگی: همان منطق صدورِ دکمه‌ی دستی، بدون نسخه‌ی دوم */
 async function callIssueHandler(handler: (req: any, res: any) => Promise<unknown>, id: number): Promise<IssueOutcome> {
-  let status = 200;
-  let body: any;
-  const res: any = {
-    status(code: number) {
-      status = code;
-      return res;
-    },
-    json(b: unknown) {
-      body = b;
-      return res;
-    },
-  };
-  await handler({ params: { id: String(id) } }, res);
+  const { status, body } = await invokeRouteHandler(handler, id);
   if (status >= 400) {
     // handler خطاها را به پاسخ ۴۰۰ تبدیل می‌کند؛ سیگنال «صدور آزمایشی» هم باید سیگنال بماند
     if (body?.error === ISSUE_DRY_RUN_MESSAGE) throw new IssueDryRunSignal();
@@ -121,7 +111,6 @@ function simpleDoc(o: SimpleDocOptions): JournalIssuer {
   };
 }
 
-const partyTitle = (p: any) => (!p ? "" : p.category === "LEGAL" ? p.name ?? "" : `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim());
 const treasuryLabel = (title: string) => (r: any) => {
   const total = (r.instrumentLines ?? []).reduce((s: number, l: any) => s + Number(l.baseAmount), 0);
   return `${title} ${r.number} — ${partyTitle(r.party)} — ${fa(r.date)} — ${total.toLocaleString("fa-IR")}`;

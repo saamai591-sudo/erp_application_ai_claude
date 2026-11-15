@@ -28,15 +28,6 @@ export const THEME_OPTIONS: ThemeOption[] = [
   { key: "dashboard", label: "داشبورد (سرمه‌ای/آبی، آیکن بدون رنگ)", swatch: ["#f4f8fc", "#123f63", "#2376d8"] },
 ];
 
-// این فایل دیگر خودش جایی برای ذخیره‌سازی نیست — فقط یک لایه‌ی نازک روی preferences.ts (که مقدار
-// واقعی را از بک‌اند/کاربر می‌خواند) به‌علاوه‌ی اعمال آن روی DOM. طبق نیاز صریح «تنظیمات باید سمت
-// کاربر در بک‌اند ذخیره شود و در هر مرورگر/سیستمی با ورود کاربر خودکار بارگذاری شود» — نه
-// localStorage/sessionStorage. ذخیره‌سازی واقعی با savePreferences (در preferences.ts) انجام می‌شود؛
-// این توابع فقط DOM را برای پیش‌نمایش زنده به‌روز می‌کنند.
-export function getSavedFont(): string {
-  return getPreference("font");
-}
-
 export function applyFont(fontKey: string) {
   const option = FONT_OPTIONS.find((f) => f.key === fontKey) || FONT_OPTIONS[0];
   document.documentElement.style.setProperty("--app-font", `"${option.family}"`);
@@ -44,10 +35,6 @@ export function applyFont(fontKey: string) {
 
 export function getSavedFiscalPeriodId(): string {
   return getPreference("fiscalPeriodId");
-}
-
-export function getSavedTheme(): string {
-  return getPreference("theme");
 }
 
 export function applyTheme(themeKey: string) {

@@ -1,5 +1,6 @@
-import { prisma, getCurrentFiscalPeriod, closedPartyBalanceRoles, invalidatePartyBalanceLockCache } from "../lib/prisma";
+import { prisma, closedPartyBalanceRoles, invalidatePartyBalanceLockCache } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { getCloseContext } from "../utils/fiscalPeriodValidation";
 
 // =========================================================================
 // «مانده مشتریان / تامین‌کنندگان» — هسته‌ی محاسبه‌ی گردش طرف‌حساب (عملیاتی؛ از اسناد فروش/خرید/دریافت/پرداخت، نه از سند حسابداری)،
@@ -289,16 +290,9 @@ export async function closingBalances(period: { id: number; fromDate: Date; toDa
 
 // ------------------------------------------------------------------ بستن سال
 
-export async function getCloseContext() {
-  const current = await getCurrentFiscalPeriod();
-  if (!current) throw new Error("دوره مالی جاری مشخص نیست");
-  const next = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { gt: current.toDate } }, orderBy: { fromDate: "asc" } });
-  return { current, next };
-}
-
 /** نقش‌هایی که مانده‌شان در این دوره بسته شده (برای قفل اسناد: lib/prisma.ts) */
-export const closedRoles = async (fiscalPeriodId: number) => (await closedPartyBalanceRoles(fiscalPeriodId)) as PartyBalanceRole[];
-export const invalidatePartyBalanceCloseCache = invalidatePartyBalanceLockCache;
+const closedRoles = async (fiscalPeriodId: number) => (await closedPartyBalanceRoles(fiscalPeriodId)) as PartyBalanceRole[];
+const invalidatePartyBalanceCloseCache = invalidatePartyBalanceLockCache;
 
 export async function closeRole(role: PartyBalanceRole): Promise<{ role: PartyBalanceRole; count: number }> {
   const { current, next } = await getCloseContext();

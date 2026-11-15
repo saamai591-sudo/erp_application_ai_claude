@@ -10,7 +10,7 @@ const STEP = 1_000_000_000;
 
 export const KIND_FA: Record<BasisKind, string> = { DELIVERY: "حواله فروش", ORDER: "سفارش فروش", QUOTE: "پیش‌فاکتور" };
 
-export const encodeBasis = (kind: BasisKind, id: number) => KINDS.indexOf(kind) * STEP + id;
+const encodeBasis = (kind: BasisKind, id: number) => KINDS.indexOf(kind) * STEP + id;
 
 export function decodeBasis(code: number): { kind: BasisKind; id: number } | null {
   const i = Math.floor(code / STEP);

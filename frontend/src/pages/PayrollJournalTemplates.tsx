@@ -17,13 +17,12 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { PARTY_KIND_FA } from "../lib/enumLabels";
 
 // حقوق و دستمزد › حسابداری حقوق › الگوی سند حقوق: هر ردیف یک رکورد مستقل (از ماه، گروه حساب، عامل، حساب معین، ماهیت، شرح، نوع طرف حساب).
 // برای ماه M و هر (گروه، عامل): بزرگ‌ترین «از ماه» ≤ M و همه‌ی رکوردهای فعالِ همان «از ماه» در سند می‌آیند؛ اگر همه غیرفعال شوند عامل «فاقد الگو» است.
 
 const NATURE_FA: Record<string, string> = { DEBIT: "بدهکار", CREDIT: "بستانکار" };
-const PARTY_KIND_FA: Record<string, string> = { EMPLOYEE: "پرسنل", FACTOR_ORG: "سازمان مرتبط با عامل", SECONDING_ORG: "سازمان مامورکننده" };
-
 interface TplRow {
   id: number;
   fromYear: number;

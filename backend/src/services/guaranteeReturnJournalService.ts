@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
 
 // سند حسابداری «استرداد دریافت/پرداخت تضمین» = معکوسِ سندِ دریافت/پرداخت اصلی برای همان ابزارها: همان معین‌ها و همان تفصیل‌های ردیف‌های حسابداریِ ذخیره‌شده
 // (GuaranteeAccountingLine) با جابه‌جایی بدهکار/بستانکار؛ مبلغ = مبلغ ابزار (چک و سفته همیشه ارز پایه‌اند). تاریخ سند = تاریخ استرداد.
@@ -28,8 +29,7 @@ export async function issueGuaranteeReturnJournal(id: number) {
   const ret = await loadReturn(id);
   if (ret.journalEntryId) throw new Error("قبلاً برای این استرداد، سند حسابداری صادر شده است");
   if (ret.lines.length === 0) throw new Error("استرداد بدون ابزار سند حسابداری ندارد");
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
   const word = ret.direction === "RECEIPT" ? "دریافت" : "پرداخت";
   const description = `بابت استرداد ${word} تضمین شماره ${ret.number} ${formatJalaliDateForMessage(ret.date)} ${ret.party.detailTitle ?? ""}`.trim();
 

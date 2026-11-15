@@ -24,3 +24,11 @@ export function autoSlotRefreshPatch(cur: StoredDims, auto: DimsLike): Record<st
   }
   return patch;
 }
+
+/** منبع هر اسلات تفصیل در ردیف حسابداری: AUTO = پرشده توسط سیستم از سند پایه، MANUAL = باید حسابدار تکمیل کند. منبع واحد برای دریافت/پرداخت/ضمانت. */
+export const detailSourcesOf = (d: { detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }) =>
+  ({
+    detail1Source: d.detail1Code ? "AUTO" : "MANUAL",
+    detail2Source: d.detail2Code ? "AUTO" : "MANUAL",
+    detail3Source: d.detail3Code ? "AUTO" : "MANUAL",
+  }) as { detail1Source: "AUTO" | "MANUAL"; detail2Source: "AUTO" | "MANUAL"; detail3Source: "AUTO" | "MANUAL" };

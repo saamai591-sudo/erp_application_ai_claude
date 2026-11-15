@@ -59,7 +59,7 @@ export function valuesToPayload(values: DetailValues | undefined | null): { deta
 }
 
 /** وقتی مقدار هدر عوض می‌شود: فقط ردیف‌هایی که هنوز مقدار قبلیِ هدر (یا خالی) دارند مقدار تازه را می‌گیرند؛ ردیفی که کاربر عمداً عوض کرده دست نمی‌خورد */
-export function applyHeaderDefault<R extends { details?: DetailValues }>(rows: R[], detailTypeId: number, previous: string | undefined, next: string): R[] {
+function applyHeaderDefault<R extends { details?: DetailValues }>(rows: R[], detailTypeId: number, previous: string | undefined, next: string): R[] {
   return rows.map((r) => {
     const cur = r.details?.[detailTypeId];
     if (cur && cur !== previous) return r;

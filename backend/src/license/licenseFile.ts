@@ -5,14 +5,14 @@ import crypto from "crypto";
 // امضا روی «همان رشته‌ی payload» (بایت‌به‌بایت) است، پس نیازی به نرمال‌سازی JSON نیست. کلید خصوصی فقط نزد صادرکننده است
 // (برنامه‌ی جدا و مستقل «مدیریت لایسنس»، بیرون از این مخزن و ایمیج‌ها)؛ کلید عمومی داخل برنامه است و فقط اعتبار امضا را می‌سنجد.
 
-export const LICENSE_FORMAT = "ERP-LICENSE";
-export const LICENSE_VERSION = 1;
+const LICENSE_FORMAT = "ERP-LICENSE";
+const LICENSE_VERSION = 1;
 
 /**
  * کلید عمومی صدور لایسنس (SPKI DER، base64). از صفحه‌ی «تنظیمات» برنامه‌ی «مدیریت لایسنس» برداشته و اینجا گذاشته می‌شود؛ تا زمانی که خالی است،
  * محصول «بدون کلید» است و فایل لایسنس تایید نمی‌شود. برای آزمایش محلی می‌شود با متغیر محیطی LICENSE_PUBLIC_KEY_B64 جایگزین کرد.
  */
-export const EMBEDDED_PUBLIC_KEY_B64 = "MCowBQYDK2VwAyEA4yc/lMFQkUsKPW8MHDKjqpMVeU+xiSrAdkwkitO63GI=";
+const EMBEDDED_PUBLIC_KEY_B64 = "MCowBQYDK2VwAyEA4yc/lMFQkUsKPW8MHDKjqpMVeU+xiSrAdkwkitO63GI=";
 
 export type LicenseModel = "PERPETUAL" | "SUBSCRIPTION";
 

@@ -19,6 +19,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { partyTitleOf } from "../lib/partyDisplay";
 
 // باشگاه مشتریان › عملیات › «فروش بن‌کارت به سازمان»: بن‌های «ایجادشده» (به تعداد یا فهرست سریال) به یک سازمان (مشتری) فروخته می‌شوند و از این لحظه بدهی ما هستند.
 // سند حسابداری (دستی): بدهکار «طلب از سازمان بابت بن‌کارت»، بستانکار «بدهی بن‌کارت» (تفصیل: سازمان). قواعد در سرور (services/voucherService.ts).
@@ -49,7 +50,6 @@ interface TypeOpt {
   faceValue: number;
   isActive: boolean;
 }
-const customerTitleOf = (c: CustomerOpt) => c.party.detailTitle || (c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim());
 const STATUS_FA: Record<string, string> = { CREATED: "ایجادشده", SOLD: "فروخته‌شده", USED: "مصرف‌شده", VOID: "باطل" };
 
 export default function VoucherSales() {
@@ -228,11 +228,11 @@ function SaleForm({ editId }: { editId?: number }) {
               <label>سازمان<RequiredMark /></label>
               <RecordPickerField<CustomerOpt>
                 title="انتخاب سازمان (مشتری)"
-                displayValue={customer ? `${toFaDigits(String(customer.code))} — ${customerTitleOf(customer)}` : ""}
+                displayValue={customer ? `${toFaDigits(String(customer.code))} — ${partyTitleOf(customer)}` : ""}
                 rows={customers}
                 columns={[
                   { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                  { header: "عنوان", render: (x) => customerTitleOf(x), filterValue: (x) => customerTitleOf(x) },
+                  { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
                 ]}
                 onSelect={(x) => setForm({ ...form, customerId: String(x.id) })}
               />

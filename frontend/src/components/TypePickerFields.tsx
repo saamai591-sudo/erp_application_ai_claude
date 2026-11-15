@@ -1,31 +1,11 @@
 import { RecordPickerField } from "./RecordPicker";
 import { selectableTypes, typeLabel } from "../lib/typeOptions";
 import { toFaDigits } from "../lib/formatAmount";
+import { RECEIPT_NATURE_FA, PAYMENT_NATURE_FA } from "../lib/enumLabels";
 
 // انتخابگرهای گریدی (دیالوگ جدول با فیلتر/مرتب‌سازی/کلید ↑↓ Enter) به‌جای <select> آبشاری برای «نوع دریافت»، «نوع پرداخت» و «مرکز هزینه».
 // رفتار نوع غیرفعال مثل قبل (lib/typeOptions): فقط نوع‌های فعال + نوع فعلیِ همان ردیف؛ تنها پیاده‌سازی است، فرم‌ها مستقیماً <select> نمی‌سازند.
 
-const RECEIPT_NATURE_FA: Record<string, string> = {
-  CUSTOMER_RECEIPT: "دریافت از مشتری",
-  ADVANCE_RECEIPT: "پیش‌دریافت",
-  SUPPLIER_RECEIPT: "دریافت از تأمین‌کننده",
-  OTHER_RECEIPT: "دریافت از سایر",
-  SALES_VAT: "ارزش افزوده فروش",
-  PURCHASE_VAT: "ارزش افزوده خرید",
-  ADVANCE_VAT_RECEIPT: "پیش دریافت ارزش افزوده",
-};
-const PAYMENT_NATURE_FA: Record<string, string> = {
-  SUPPLIER_PAYMENT: "پرداخت به تأمین‌کننده",
-  ADVANCE_PAYMENT: "پیش‌پرداخت",
-  ADVANCE_VAT_PAYMENT: "پیش‌پرداخت ارزش افزوده",
-  CUSTOMER_PAYMENT: "پرداخت به مشتری",
-  OTHER_PAYMENT: "پرداخت به سایر",
-  PURCHASE_VAT: "ارزش افزوده خرید",
-  SALES_VAT: "ارزش افزوده فروش",
-  TO_BANK: "به بانک",
-  TO_CASH_BOX: "به صندوق",
-  TO_PETTY_CASH: "به تنخواه",
-};
 const BASIS_FA: Record<string, string> = {
   NONE: "بدون مبنا",
   SALES_INVOICE: "فاکتور فروش",

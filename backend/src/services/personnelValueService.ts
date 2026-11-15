@@ -12,12 +12,7 @@ import { employeeIdsInPeriod } from "./employmentStatusService";
 export class PersonnelValueError extends Error {}
 
 export type PersonnelKind = "PERSONNEL_HR" | "PERSONNEL_PAYROLL";
-export const PERSONNEL_KINDS: PersonnelKind[] = ["PERSONNEL_HR", "PERSONNEL_PAYROLL"];
 export const isPersonnelKind = (k: string | null | undefined): k is PersonnelKind => k === "PERSONNEL_HR" || k === "PERSONNEL_PAYROLL";
-export const PERSONNEL_KIND_FA: Record<PersonnelKind, string> = {
-  PERSONNEL_HR: "مقدار ثابت پرسنلی - منابع انسانی",
-  PERSONNEL_PAYROLL: "مقدار ثابت پرسنلی - حقوقی",
-};
 const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 const day = (d: Date) => d.toISOString().slice(0, 10);
 

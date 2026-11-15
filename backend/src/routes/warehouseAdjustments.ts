@@ -12,6 +12,7 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, setLineAmount, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { getBaseCurrencyDecimalsStrict } from "../services/baseCurrencyService";
 
 const FORM = findFormPrefix("warehousing-warehouse-adjustments");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -63,12 +64,6 @@ interface HeaderBody {
 function computeAmount(quantity: number, unitCost: number, decimalPlaces: number): number {
   const factor = Math.pow(10, decimalPlaces);
   return Math.round(quantity * unitCost * factor) / factor;
-}
-
-async function getBaseCurrencyDecimalPlaces(): Promise<number> {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است؛ ابتدا یک ارز را به‌عنوان ارز پایه مشخص کنید");
-  return baseCurrency.decimalPlaces;
 }
 
 async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
@@ -326,7 +321,7 @@ router.put("/warehouse-adjustments/:id", can(`${FORM}.edit`), async (req: Authed
           throw new Error(`این سند تایید حسابداری شده است؛ کالا/واحد/مقدار ردیف ${idx + 1} قابل تغییر نیست`);
         }
       }
-      const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+      const decimalPlaces = await getBaseCurrencyDecimalsStrict();
       await prisma.$transaction(async (tx) => {
         for (const [idx, l] of sortedExisting.entries()) {
           const unitCost = Number((body.lines[idx] as any).unitCost) || 0;

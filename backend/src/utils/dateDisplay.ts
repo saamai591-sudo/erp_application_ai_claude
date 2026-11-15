@@ -12,7 +12,7 @@ import gregorian_en from "react-date-object/locales/gregorian_en";
  */
 export type DisplayCalendar = "JALALI" | "GREGORIAN";
 
-export const DISPLAY_CALENDAR: DisplayCalendar = String(process.env.DISPLAY_CALENDAR ?? "").toUpperCase() === "GREGORIAN" ? "GREGORIAN" : "JALALI";
+const DISPLAY_CALENDAR: DisplayCalendar = String(process.env.DISPLAY_CALENDAR ?? "").toUpperCase() === "GREGORIAN" ? "GREGORIAN" : "JALALI";
 
 const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 

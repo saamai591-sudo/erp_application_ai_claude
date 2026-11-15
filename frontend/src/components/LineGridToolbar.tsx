@@ -1,5 +1,6 @@
 import { ReactNode, useState } from "react";
 import { exportGridToCsv, type ExportColumn } from "../lib/gridExport";
+import { TrashIcon, ExcelExportIcon } from "./icons";
 
 // نوار ابزار پایه‌ی گریدهای ردیفی اسناد (طبق تصمیم صریح کاربر: «در base انجام بده، در هر فرم می‌گویم
 // کدام لازم نیست») — افزودن/حذف/جابه‌جایی بالا-پایین/فیلتر/خروجی اکسل به‌صورت پیش‌فرض فعال، «بارگذاری»
@@ -147,14 +148,6 @@ function PlusIcon() {
   );
 }
 
-function TrashIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7h12ZM10 11v6M14 11v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function ChevronUpIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
@@ -175,16 +168,6 @@ function FilterIcon({ active }: { active: boolean }) {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"}>
       <path d="M4 5h16l-6 8v6l-4-2v-4L4 5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function ExcelExportIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M8.5 13.5 12 18M12 13.5l-3.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

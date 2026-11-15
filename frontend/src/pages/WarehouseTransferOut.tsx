@@ -21,6 +21,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («حواله انتقالی») فقط طرف ارسال (خروج از
 // انبار مبدا) را پوشش می‌دهد. با قطعی‌کردن این سند، فقط موجودی انبار مبدا کم می‌شود؛ کالا تا زمانی که
@@ -109,14 +110,6 @@ export default function WarehouseTransferOut() {
   if (isNew) return <WarehouseTransferOutForm basePath={basePath} />;
   if (isEdit) return <WarehouseTransferOutForm basePath={basePath} editId={Number(id)} />;
   return <WarehouseTransferOutList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 function WarehouseTransferOutList({ basePath }: { basePath: string }) {
@@ -213,7 +206,7 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
 
   const detailConfig = useDocDetailConfig("WAREHOUSE_TRANSFER_OUT");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; destWarehouseId: string; description: string; details: DetailValues },
     RowState,
     Detail

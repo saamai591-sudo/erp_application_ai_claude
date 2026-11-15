@@ -22,7 +22,7 @@ export const KIND_FA: Record<string, string> = { GOODS: "کالا", SERVICE: "خ
 //               که «تاثیر در عنوان کالا» غیر از NONE دارند
 // =========================================================================
 
-export async function loadGroupChain(goodsGroupId: number) {
+async function loadGroupChain(goodsGroupId: number) {
   let current = await prisma.goodsGroup.findUnique({ where: { id: goodsGroupId }, include: { level: true } });
   if (!current) throw new Error("گروه یافت نشد");
   const leaf = current;

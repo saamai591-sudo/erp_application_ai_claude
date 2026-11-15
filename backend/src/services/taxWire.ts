@@ -6,15 +6,15 @@
 
 import { Prisma } from "@prisma/client";
 
-export const WIRE_HEADER_KEYS = [
+const WIRE_HEADER_KEYS = [
   "taxid", "indatim", "indati2m", "inty", "inno", "irtaxid", "inp", "ins", "tins", "tob", "bid", "tinb", "sbc", "bpc", "bbc", "ft", "bpn", "scln", "scc", "crn", "billid",
   "tprdis", "tdis", "tadis", "tvam", "todam", "tbill", "setm", "cap", "insp", "tvop", "tax17", "cdcn", "cdcd", "tonw", "torv", "tocv",
 ] as const;
-export const WIRE_BODY_KEYS = [
+const WIRE_BODY_KEYS = [
   "sstid", "sstt", "mu", "am", "fee", "cfee", "cut", "exr", "prdis", "dis", "adis", "vra", "vam", "odt", "odr", "odam", "olt", "olr", "olam", "consfee", "spro", "bros", "tcpbs",
   "cop", "vop", "bsrn", "tsstam", "nw", "ssrv", "sscv",
 ] as const;
-export const WIRE_PAYMENT_KEYS = ["iinn", "acn", "trmn", "trn", "pcn", "pid", "pdt", "pmt", "pv"] as const;
+const WIRE_PAYMENT_KEYS = ["iinn", "acn", "trmn", "trn", "pcn", "pid", "pdt", "pmt", "pv"] as const;
 
 export interface WireInvoice {
   header: Record<string, any>;

@@ -8,13 +8,14 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
-import { VALUE_TYPE_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm, parseHours } from "../lib/payrollLabels";
+import { VALUE_TYPE_FA, currentJalaliYearMonth, hoursToHm, parseHours } from "../lib/payrollLabels";
 import { useCalcTypes } from "../lib/useCalcTypes";
 import { WorkMonthPicker } from "../components/WorkMonthPicker";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { Modal } from "../components/Modal";
 import { usePermissions } from "../lib/usePermissions";
+import { toEnglishDigits } from "../lib/digits";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ماه را انتخاب کنید، «لود اطلاعات» را بزنید؛ گرید کد پرسنل، عنوان و به‌ازای هر عاملِ «ورود دستی» یک ستون
 // دارد. فرمت مجاز هر ستون را نوع پارامتر عامل تعیین می‌کند: ساعت دقیقه hhh:mm — روز عدد صحیح — عدد اعشاری — مبلغ اعشار تا ارز پایه.
@@ -51,7 +52,7 @@ function toCell(v: string | null | undefined, valueType: string): string {
   return String(n);
 }
 
-const toLatin = (s: string) => s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/٫/g, ".");
+const toLatin = (s: string) => toEnglishDigits(s).replace(/٫/g, ".");
 
 /** سلول ساعت:دقیقه با ماسک hhh:mm؛ کاربر فقط رقم می‌زند و «:» خودکار می‌آید */
 function TimeCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {

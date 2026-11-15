@@ -97,7 +97,7 @@ export function usePermissions() {
  * مصرف‌کننده‌ی اصلی: filterModulesByAccess در navConfig.ts (فیلتر کردن منو بر اساس دسترسی واقعی
  * کاربر) — به‌جای این‌که هر فرم در navConfig.ts کلید کامل خودش را جداگانه حفظ کند.
  */
-export function hasFormViewFor(permissions: Set<string>, formKey: string): boolean {
+function hasFormViewFor(permissions: Set<string>, formKey: string): boolean {
   const suffix = `.${formKey}.view`;
   for (const key of permissions) {
     if (key.endsWith(suffix)) return true;

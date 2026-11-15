@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // منبع داده‌ی گزارش «مرور صندوق» (خزانه‌داری > گزارش). هر «گردش صندوق» یک ورودی (دریافت) یا خروجی (پرداخت) روی
@@ -35,11 +36,6 @@ export interface CashBoxMeta {
   title: string;
 }
 
-function partyDisplay(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 export async function loadCashBoxes(): Promise<Map<number, CashBoxMeta>> {
   const boxes = await prisma.cashBox.findMany();
   return new Map(boxes.map((b: any) => [b.id, { id: b.id, code: b.detailCode, title: b.title }]));
@@ -65,7 +61,7 @@ export async function getCashMovements(toDate: Date, fromDate?: Date): Promise<C
         docTypeCode: "RECEIPT",
         docId: l.receiptId,
         docNumber: l.receipt.number,
-        partyDisplay: partyDisplay(l.receipt.party),
+        partyDisplay: partyTitle(l.receipt.party),
         description: l.description || l.receipt.description,
         inflow: Number(l.baseAmount),
         outflow: 0,
@@ -88,7 +84,7 @@ export async function getCashMovements(toDate: Date, fromDate?: Date): Promise<C
         docTypeCode: "PAYMENT",
         docId: l.paymentId,
         docNumber: l.payment.number,
-        partyDisplay: partyDisplay(l.payment.party),
+        partyDisplay: partyTitle(l.payment.party),
         description: l.description || l.payment.description,
         inflow: 0,
         outflow: Number(l.baseAmount),

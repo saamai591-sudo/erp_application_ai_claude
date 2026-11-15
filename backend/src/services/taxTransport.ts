@@ -67,7 +67,7 @@ export function xorCyclic(a: Buffer, b: Buffer): Buffer {
 }
 
 /** رمزنگاری یک JSON برای ارسال: خروجی همه‌ی فیلدهای لازم بسته‌ی رمزشده */
-export function encryptJsonForTax(json: string, serverPublicKeyDerBase64: string) {
+function encryptJsonForTax(json: string, serverPublicKeyDerBase64: string) {
   const aesKey = crypto.randomBytes(32);
   let iv = crypto.randomBytes(16);
   while (iv.includes(0)) iv = crypto.randomBytes(16); // SDK بایت صفر در IV نمی‌گذارد

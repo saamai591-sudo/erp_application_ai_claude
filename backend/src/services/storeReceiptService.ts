@@ -6,6 +6,7 @@ import { getRequestContext } from "../lib/requestContext";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { StoreSaleError, assertAfterLastDelivery, saleTotals } from "./storeSaleService";
 import { bankAccountDetailTitle } from "../utils/detailValues";
+import { parseDateOnlyUtc } from "../utils/inputParse";
 
 // فروش فروشگاهی › «دریافت فروشگاهی» — تنها محل قواعد (نقد به صندوقِ ایستگاهِ همان فروش، یا کارتی با یکی از کارتخوان‌های اختصاص‌یافته به آن ایستگاه؛ بدون سند حسابداری).
 // • جمع «همه»ی دریافت‌ها (نقد + کارتی) از مبلغ قابل پرداخت بیشتر نمی‌شود؛ باقی‌مانده‌ی هر دو روش از همین جمع مشترک محاسبه می‌شود.
@@ -46,11 +47,7 @@ export interface CardReceiptItem {
   referenceNumber?: string | null;
 }
 
-function parseDate(raw: unknown): Date {
-  const d = new Date(String(raw ?? ""));
-  if (!raw || Number.isNaN(d.getTime())) throw new StoreSaleError("تاریخ دریافت الزامی و باید معتبر باشد");
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
+const parseDate = (raw: unknown): Date => parseDateOnlyUtc(raw, "تاریخ دریافت", (m) => new StoreSaleError(m));
 
 export async function checked(body: Body) {
   const date = parseDate(body.date);

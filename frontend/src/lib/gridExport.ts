@@ -40,7 +40,7 @@ function toDisplayText(value: any): string {
 /** نسخه‌ی متنی خالص هر سلول: اگر render() مستقیم رشته/عدد برگرداند همان (دقیقاً همان چیزی که کاربر
  * می‌بیند)؛ اگر JSX برگرداند (مثل بج وضعیت یا مبلغ رنگی)، به filterValue برمی‌گردد که طبق قرارداد
  * همین کدبیس همیشه معادل متنیِ همان ستون است */
-export function cellText<T>(col: ExportColumn<T>, row: T): string {
+function cellText<T>(col: ExportColumn<T>, row: T): string {
   if (col.exportValue) {
     const ev = col.exportValue(row);
     return ev === null || ev === undefined ? "" : toDisplayText(ev);
@@ -68,7 +68,7 @@ function isNumericColumn<T>(col: ExportColumn<T>): boolean {
  *  - رشته‌ی عددیِ فرمت‌شده با جداکننده/اعشار (مثل 1,234.50) در ستونی که نوع مشخص ندارد ⇒ عدد (همان رفتار قبلی)
  *  - هر چیز دیگر ⇒ متن
  */
-export function toExcelCell(raw: any, text: string, numericColumn: boolean): ExcelCell {
+function toExcelCell(raw: any, text: string, numericColumn: boolean): ExcelCell {
   const t = toEnglishDigits(text);
   if (t === "") return "";
   const asNumber = (s: string) => {
@@ -104,7 +104,7 @@ export function downloadExcel(rows: ExcelCell[][], fileName: string, sheetName =
   XLSX.writeFile(wb, `${fileName}.xlsx`);
 }
 
-export function exportGridToExcel<T>(columns: ExportColumn<T>[], rows: T[], gridName: string) {
+function exportGridToExcel<T>(columns: ExportColumn<T>[], rows: T[], gridName: string) {
   // طبق درخواست صریح کاربر: ارقام در خروجی اکسل نباید فارسی باشند؛ و مقادیر رشته‌ایِ فقط‌رقمی (00001 و...)
   // باید دقیقاً به‌صورت متن بروند تا صفرهای ابتدایی حذف نشود، در حالی‌که مبلغ/تعداد/نرخ عدد می‌مانند.
   // این تنها نقطه‌ی خروجی اکسلِ همه‌ی گریدها (DataTable/SelectableBalanceTable/LineGridToolbar/BulkErrorDialog) است.

@@ -1,12 +1,15 @@
 import { prisma } from "../lib/prisma";
 import { SIGNED_TYPES } from "./warehouseStockService";
 
-// «آنالیز موجودی» (وضعیت فعلی، سطح کالا): موجودی واقعی + موجودی در راه − مقدار تعهدشده = موجودی در دسترس.
+// «آنالیز موجودی» (وضعیت فعلی، سطح کالا): موجودی واقعی + موجودی در راه + در حال تولید − مقدار تعهدشده = موجودی در دسترس.
 // همه‌چیز از روی داده‌ها محاسبه می‌شود (چیزی ذخیره نمی‌شود) و با SQL تجمیعی؛ سال‌های مالی تجمعی‌اند (مثل computeStockAsOf).
 //  - موجودی واقعی: همان قاعده‌ی computeStockAsOf (اسناد انباری امضادار، سند انتقال مانده‌ی سیستمی شمرده نمی‌شود،
 //    فروش فروشگاهیِ تحویل‌نشده فقط تعداد کم می‌کند) روی همه‌ی انبارها.
 //  - در راه: مانده‌ی ردیف‌های سفارش خرید تاییدشده = تعداد − رسیدشده (مستقیم یا از طریق مجوز تحویل).
 //  - تعهدشده: مانده‌ی حواله‌نشده‌ی ردیف‌های سفارش فروش تاییدشده = تعداد − حواله‌شده. پیش‌فاکتور تعهد نیست.
+//  - در حال تولید: مانده‌ی دستورهای تولید «صادرشده» = مقدار دستور − تولیدشده (جمع «آمار تولید»ِ وصل‌شده به همان دستور)؛ منبع حقیقتِ این
+//    تعریف همین‌جاست و MRP (services/mrpService.ts) و فرم دستور تولید هم از همین می‌خوانند. تنها تقریب: بین ثبت آمار تولید و ثبت رسید
+//    انبار، مقدارِ تولیدشده نه در «در حال تولید» می‌ماند نه هنوز در موجودی آمده است.
 // کالاها فقط (نه خدمت)؛ مقدارها همان‌طور که در اسناد ثبت شده‌اند (واحد اصلی کالا — هم‌الگوی مانده‌ی سفارش در فرم‌های حواله/رسید).
 
 export interface StockAnalysisRow {
@@ -16,6 +19,7 @@ export interface StockAnalysisRow {
   unit: string;
   stock: number;
   inTransit: number;
+  inProduction: number;
   committed: number;
   available: number;
 }
@@ -36,7 +40,19 @@ const RECEIVED_BY_PO_SQL = `SELECT x."poLineId", SUM(x.qty) AS qty FROM (
         LEFT JOIN "DeliveryAuthorizationLine" dal2 ON dal2."id" = tl."sourceDeliveryAuthorizationLineId"
       ) x GROUP BY x."poLineId"`;
 
-export async function getStockAnalysis(): Promise<StockAnalysisRow[]> {
+/** مانده‌ی تولید هر دستور صادرشده: مقدار دستور − جمع آمار تولید وصل‌شده به آن (SQL مشترک خلاصه‌ی «در حال تولید» و ریز آن) */
+const ORDER_PRODUCED_SQL = `SELECT sl."productionOrderId" AS "orderId", SUM(sl."quantity") AS qty
+        FROM "ProductionStatLine" sl
+        WHERE sl."productionOrderId" IS NOT NULL
+        GROUP BY sl."productionOrderId"`;
+
+/**
+ * خلاصه‌ی آنالیز موجودی. `itemIds` (اختیاری) فقط همان کالاها را برمی‌گرداند — در این حالت کالای بدون هیچ مقدار هم یک ردیف صفر دارد
+ * (برای نمای «موجودی/کسری» کنار اجزای دستور تولید)؛ بدون آن فقط کالاهایی که دست‌کم یک مقدار ناصفر دارند.
+ */
+export async function getStockAnalysis(itemIds?: number[]): Promise<StockAnalysisRow[]> {
+  const ids = itemIds?.filter((n) => Number.isInteger(n) && n > 0);
+  if (itemIds && !ids?.length) return [];
   // علامت هر نوع سند (به‌جز تعدیل که مقدارش از قبل امضادار است) به‌صورت CASE ثابت و امن (فقط ثابت‌های کد، نه ورودی کاربر)
   const signCase = SIGNED_TYPES.map(
     (r) =>
@@ -45,7 +61,7 @@ export async function getStockAnalysis(): Promise<StockAnalysisRow[]> {
   ).join("\n        ");
 
   const rows = await prisma.$queryRawUnsafe<
-    { id: number; code: string; title: string; unit: string; stock: any; inTransit: any; committed: any }[]
+    { id: number; code: string; title: string; unit: string; stock: any; inTransit: any; inProduction: any; committed: any }[]
   >(`
     WITH stock AS (
       SELECT l."goodsItemId" AS "itemId", SUM(CASE
@@ -87,18 +103,30 @@ export async function getStockAnalysis(): Promise<StockAnalysisRow[]> {
       JOIN "SalesOrder" so ON so."id" = sl."salesOrderId" AND so."status"::text = 'APPROVED'
       LEFT JOIN so_delivered dv ON dv."soLineId" = sl."id"
       GROUP BY sl."goodsItemId"
+    ),
+    order_produced AS (
+      ${ORDER_PRODUCED_SQL}
+    ),
+    in_production AS (
+      SELECT o."outputItemId" AS "itemId", SUM(GREATEST(o."quantity" - COALESCE(op.qty, 0), 0)) AS qty
+      FROM "ProductionOrder" o
+      LEFT JOIN order_produced op ON op."orderId" = o."id"
+      WHERE o."status"::text = 'RELEASED'
+      GROUP BY o."outputItemId"
     )
     SELECT g."id", g."fullCode" AS code, g."title", u."title" AS unit,
       COALESCE(s.qty, 0) - COALESCE(sp.qty, 0) AS stock,
       COALESCE(t.qty, 0) AS "inTransit",
+      COALESCE(ip.qty, 0) AS "inProduction",
       COALESCE(c.qty, 0) AS committed
     FROM "GoodsItem" g
     JOIN "UnitOfMeasure" u ON u."id" = g."mainUnitId"
     LEFT JOIN stock s ON s."itemId" = g."id"
     LEFT JOIN store_pending sp ON sp."itemId" = g."id"
     LEFT JOIN in_transit t ON t."itemId" = g."id"
+    LEFT JOIN in_production ip ON ip."itemId" = g."id"
     LEFT JOIN committed c ON c."itemId" = g."id"
-    WHERE g."kind"::text = 'GOODS'
+    WHERE g."kind"::text = 'GOODS'${ids ? ` AND g."id" IN (${ids.join(",")})` : ""}
     ORDER BY g."fullCode"
   `);
 
@@ -106,10 +134,11 @@ export async function getStockAnalysis(): Promise<StockAnalysisRow[]> {
     .map((r) => {
       const stock = Number(r.stock);
       const inTransit = Number(r.inTransit);
+      const inProduction = Number(r.inProduction);
       const committed = Number(r.committed);
-      return { id: r.id, code: r.code, title: r.title, unit: r.unit, stock, inTransit, committed, available: stock + inTransit - committed };
+      return { id: r.id, code: r.code, title: r.title, unit: r.unit, stock, inTransit, inProduction, committed, available: stock + inTransit + inProduction - committed };
     })
-    .filter((r) => r.stock !== 0 || r.inTransit !== 0 || r.committed !== 0);
+    .filter((r) => ids || r.stock !== 0 || r.inTransit !== 0 || r.inProduction !== 0 || r.committed !== 0);
 }
 
 // ریز سفارش‌های پشت سلول «تعهدشده» (سفارش فروش تاییدشده) یا «در راه» (سفارش خرید تاییدشده) برای یک کالا.
@@ -123,10 +152,30 @@ export interface StockAnalysisOrderRow {
   remaining: number;
 }
 
-export async function getStockAnalysisOrders(itemId: number, kind: "committed" | "in-transit"): Promise<StockAnalysisOrderRow[]> {
+export async function getStockAnalysisOrders(itemId: number, kind: "committed" | "in-transit" | "in-production"): Promise<StockAnalysisOrderRow[]> {
   const partyTitle = `COALESCE(NULLIF(p."detailTitle", ''), CASE WHEN p."category"::text = 'LEGAL' THEN p."name" ELSE TRIM(COALESCE(p."firstName", '') || ' ' || COALESCE(p."lastName", '')) END)`;
+  // دستورهای تولید صادرشده‌ی این کالا با مانده‌ی > ۰؛ «partyTitle» = «انباری» یا «سفارشی — مشتری» (دستور به ردیف سفارش فروش/پیش‌فاکتور وصل است)
   const sql =
-    kind === "committed"
+    kind === "in-production"
+      ? `
+    WITH op AS (
+      ${ORDER_PRODUCED_SQL}
+    )
+    SELECT o."id" AS "orderId", o."number", o."date",
+      CASE WHEN o."salesOrderLineId" IS NULL AND o."salesQuoteLineId" IS NULL THEN 'انباری'
+           ELSE 'سفارشی — ' || COALESCE(NULLIF(cp."detailTitle", ''), '') END AS "partyTitle",
+      o."quantity" AS quantity, GREATEST(o."quantity" - COALESCE(op.qty, 0), 0) AS remaining
+    FROM "ProductionOrder" o
+    LEFT JOIN op ON op."orderId" = o."id"
+    LEFT JOIN "SalesOrderLine" sol ON sol."id" = o."salesOrderLineId"
+    LEFT JOIN "SalesOrder" so ON so."id" = sol."salesOrderId"
+    LEFT JOIN "SalesQuoteLine" sql2 ON sql2."id" = o."salesQuoteLineId"
+    LEFT JOIN "SalesQuote" sq ON sq."id" = sql2."salesQuoteId"
+    LEFT JOIN "Customer" cu ON cu."id" = COALESCE(so."customerId", sq."customerId")
+    LEFT JOIN "Party" cp ON cp."id" = cu."partyId"
+    WHERE o."outputItemId" = $1 AND o."status"::text = 'RELEASED' AND o."quantity" - COALESCE(op.qty, 0) > 0
+    ORDER BY o."date", o."number"`
+      : kind === "committed"
       ? `
     WITH dv AS (
       SELECT l."sourceSalesOrderLineId" AS "lineId", SUM(l."quantity") AS qty

@@ -3,10 +3,10 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertChequeBaseDatesNotAfter, filterChequesByBaseDate } from "../services/chequeBaseDates";
 import { chequeHolders } from "../services/chequeHolderService";
+import { partyTitle } from "../utils/partyTitle";
 
 const FORM = findFormPrefix("cash-box-transfers");
 
@@ -39,8 +39,6 @@ const INCLUDE = {
   lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
 } as const;
 
-const partyName = (p: any) => (p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim());
-
 /** سطرِ چک برای انتخابگر/جزئیات */
 function chequeShape(c: any) {
   return {
@@ -49,7 +47,7 @@ function chequeShape(c: any) {
     dueDate: c.dueDate,
     amount: Number(c.amount),
     currencyTitle: c.currency?.title,
-    partyDisplay: partyName(c.party),
+    partyDisplay: partyTitle(c.party),
   };
 }
 
@@ -79,14 +77,6 @@ function lockReasonOf(d: any): string | null {
   return `برای چک شماره ${touched.chequeItem.number} بعد از این انتقال اتفاق دیگری ثبت شده است؛ ابتدا آن را برگردانید`;
 }
 
-async function resolveFiscalPeriod(date: Date) {
-  const fp = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fp) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fp.id);
-  await assertDateNotConfirmed(prisma, date, fp.id);
-  return fp;
-}
-
 async function cleanHeader(body: Body) {
   if (!body.date) throw new Error("تاریخ سند الزامی است");
   const date = new Date(body.date);
@@ -98,7 +88,7 @@ async function cleanHeader(body: Body) {
   if (fromCashBoxId === toCashBoxId) throw new Error("صندوق مبدا و مقصد نمی‌توانند یکی باشند");
   const boxes = await prisma.cashBox.findMany({ where: { id: { in: [fromCashBoxId, toCashBoxId] } }, select: { id: true } });
   if (boxes.length !== 2) throw new Error("صندوق مبدا یا مقصد یافت نشد");
-  const fiscalPeriod = await resolveFiscalPeriod(date);
+  const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
   return { date, fromCashBoxId, toCashBoxId, fiscalPeriodId: fiscalPeriod.id, description: body.description?.trim() || null };
 }
 

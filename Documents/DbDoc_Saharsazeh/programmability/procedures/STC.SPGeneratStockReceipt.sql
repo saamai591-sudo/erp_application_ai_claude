@@ -1,0 +1,296 @@
+﻿-------------------------------------
+CREATE   PROC [STC].SPGeneratStockReceipt
+(
+    @OutgoingID INT,
+    @type TINYINT
+)
+
+--WITH ENCRYPTION 
+AS
+BEGIN
+    DECLARE @DeliverStockID INT,
+            @StockID INT,
+            @Date DATE,
+            @UserId INT = cfg.getuserid(),
+            @GetDate DATETIME = GETDATE(),
+            @FinancialPeriodID INT,
+            @StockReceiptID INT,
+            @MaxItemID INT,
+            @IdForCursor NVARCHAR(MAX),
+            @Message NVARCHAR(MAX),
+            @FinalStuffInventoryErrors NVARCHAR(MAX),
+            @StockDocumentTypeBaseEntityId INT;
+
+	set @FinalStuffInventoryErrors = cfg.getTempTableName(1)
+	
+    CREATE TABLE  #error  (
+    [Message] NVARCHAR(MAX) ,
+    IsDetail BIT )
+
+    BEGIN TRY
+
+        CREATE TABLE #OutgoingItem
+        (
+            ID INT,
+            OutgoingItemID INT,
+            RowIndex INT,
+            StuffID INT,
+            MainQuantity DECIMAL(30, 4),
+            SubQuantity DECIMAL(30, 4),
+            Description NVARCHAR(MAX),
+            Description2 NVARCHAR(MAX)
+        );
+
+        INSERT INTO #OutgoingItem
+        SELECT ROW_NUMBER() OVER (ORDER BY oi.OutgoingItemID) AS ID,
+                oi.OutgoingItemID,
+                oi.RowIndex,
+                oi.StuffID,
+                oi.MainQuantity,
+                oi.SubQuantity,
+                oi.Description,
+                oi.Description2
+        FROM STC.OutgoingItem oi
+		left join stc.StockReceiptItem sri on sri.OutgoingItemID = oi.OutgoingItemID
+        WHERE OutgoingID = @OutgoingID
+		and sri.StockReceiptItemID is null ;
+
+		if exists (select 1 from #OutgoingItem)
+		begin
+
+            SELECT DISTINCT
+                   tdnt.TraceID
+            INTO #TraceIds
+            FROM STF.StuffTraceDocumentNum AS stdn
+                JOIN STF.TraceDocumentNumType AS tdnt
+                    ON tdnt.TraceDocumentNumTypeID = stdn.TraceDocumentNumTypeID
+                JOIN CFG.DocumentNumType AS dnt
+                    ON dnt.DocumentNumTypeID = tdnt.DocumentNumTypeID
+            WHERE dnt.EngName = 'StockReceipt';
+
+            SELECT @StockID = StockID,
+                   @DeliverStockID = DeliverStockID,
+                   @Date = Date,
+                   @FinancialPeriodID = FinancialPeriodID
+            FROM STC.Outgoing
+            WHERE OutgoingID = @OutgoingID;
+
+			create table #StockReceipt
+			(
+			    [StockReceiptID] int,
+			    [Version] int,
+			    [Number] int
+			)
+            IF (@type = 4)
+				SELECT @StockDocumentTypeBaseEntityId = sdtb.StockDocumentTypeBaseEntityId
+				FROM STC.StockDocumentType sdt
+                JOIN [STC].[StockDocumentTypeBaseEntity] sdtb ON sdt.StockDocumentTypeID = sdtb.StockDocumentTypeID
+				WHERE DocumentType = 5  --انتقال?              
+                AND sdtb.Entity = 1 -- رس?د انبار
+				AND sdtb.BaseEntity = 9 --حواله انبار
+                AND Type = 1;
+
+            IF (@type = 5)
+				SELECT @StockDocumentTypeBaseEntityId = sdtb.StockDocumentTypeBaseEntityId
+				FROM STC.StockDocumentType sdt
+                JOIN [STC].[StockDocumentTypeBaseEntity] sdtb ON sdt.StockDocumentTypeID = sdtb.StockDocumentTypeID
+				WHERE DocumentType = 3 --ضا?عات
+                AND sdtb.Entity = 1 -- رس?د انبار
+				AND sdtb.BaseEntity = 1 --بدون مبنا
+                AND Type = 1;
+
+            IF (@type = 5)
+            BEGIN
+
+                UPDATE #OutgoingItem
+                SET StuffID = sd.DamageStuffID,
+                    #OutgoingItem.MainQuantity = CASE
+                                                     WHEN sd.MainToSpoilageConvertRatio IS NOT NULL THEN
+                                                         MainQuantity / sd.MainToSpoilageConvertRatio
+                                                     ELSE
+                                                         MainQuantity
+                                                 END
+                FROM #OutgoingItem oi
+                    JOIN STF.StuffDetail sd
+                        ON oi.StuffID = sd.StuffID;
+
+                IF EXISTS (SELECT StuffID FROM #OutgoingItem WHERE StuffID IS NULL)
+                BEGIN
+
+					INSERT INTO #error values('STC_SPGeneratAutoReturnedStockReceipt_1',0);
+				
+					SELECT * FROM #error
+					RETURN;
+                END;
+
+                UPDATE #OutgoingItem
+                SET #OutgoingItem.SubQuantity = CASE
+                                                    WHEN MeasureSubUnitID IS NOT NULL THEN
+                                                        MainQuantity / sd.ConvertRatio
+                                                    ELSE
+                                                        NULL
+                                                END
+                FROM #OutgoingItem oi
+                    JOIN STF.StuffDetail sd
+                        ON oi.StuffID = sd.StuffID;
+
+            END;
+	
+			insert into #StockReceipt
+            EXEC [STC].[spStockReceiptInsert]   @AutoGenerated = 0,
+                                                @StockDocumentTypeBaseEntityID = @StockDocumentTypeBaseEntityId,
+                                                @StockID = @DeliverStockID,
+                                                @DeliverDlID = NULL,
+                                                @DeliverStockID = @StockID,
+                                                @Number = 0,
+                                                @Date = @Date,
+                                                @TotalInvoicePrice = 0,
+                                                @TotalEstimatedPrice = 0,
+                                                @TotalCosts = 0,
+                                                @TotalNetPrice = 0,
+                                                @PreVoucherID = NULL,
+                                                @OutgoingID = NULL,
+                                                @Creator = @userid,
+                                                @CreationDate = @getdate,
+                                                @LastEditor = @userid,
+                                                @LastEditionDate = @getdate,
+                                                @FinancialPeriodID = @FinancialPeriodID
+			select @StockReceiptID = StockReceiptID
+			from #StockReceipt
+
+            SET @MaxItemID = ISNULL(
+                                (
+                                    SELECT MAX([StockReceiptItemID]) FROM [STC].[StockReceiptItem]
+                                ),
+                                0
+                                    );
+
+            UPDATE #OutgoingItem
+            SET ID = ID + @MaxItemID;
+
+            SET IDENTITY_INSERT [STC].[StockReceiptItem] ON;
+            INSERT INTO [STC].[StockReceiptItem]
+            (
+                [StockReceiptItemID],
+                [StockReceiptID],
+                [RowIndex],
+                [OutgoingItemID],
+                [PurchaseInvoiceItemID],
+                [StuffID],
+                [MainQuantity],
+                [SubQuantity],
+                [Fee],
+                [Price],
+                [EstimatedFee],
+                [EstimatedPrice],
+                [ShareOfCosts],
+                --,[NetPrice]
+                --  ,[Cost]
+                [Description],
+                [Description2],
+                [Version],
+                [Creator],
+                [CreationDate],
+                [LastEditor],
+                [LastEditionDate]
+            )
+            SELECT ID,
+                    @StockReceiptID,
+                    RowIndex,
+                    OutgoingItemID,
+                    NULL,
+                    StuffID,
+                    MainQuantity,
+                    SubQuantity,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    --	0,
+                    --	0,
+                    Description,
+                    Description2,
+                    0,
+                    @UserId,
+                    @getdate,
+                    @UserId,
+                    @getdate
+            FROM #OutgoingItem;
+            SET IDENTITY_INSERT [STC].[StockReceiptItem] OFF;
+
+            INSERT INTO [STC].[StockReceiptItemTrace]
+            (
+                [StockReceiptItemID],
+                [TraceID],
+                [DlID],
+                [Value],
+                [Version],
+                [Creator],
+                [CreationDate],
+                [LastEditor],
+                [LastEditionDate],
+				[TraceItemID]
+            )
+            SELECT oi.ID,
+                    oit.TraceID,
+                    oit.DlID,
+                    oit.Value,
+                    0,
+                    @UserId,
+                    @getdate,
+                    @UserId,
+                    @getdate,
+					oit.TraceItemID
+            FROM #OutgoingItem oi
+                JOIN STC.OutgoingItemTrace oit
+                    ON oit.OutgoingItemID = oi.OutgoingItemID
+                JOIN #TraceIds
+                    ON #TraceIds.TraceID = oit.TraceID;
+
+            SELECT @IdForCursor = STUFF(
+            (
+                SELECT ',' + CAST(ID AS NVARCHAR(20))
+                FROM #OutgoingItem
+                FOR XML PATH(''), TYPE
+            ).value('.', 'NVARCHAR(MAX)'),
+            1   ,
+            1   ,
+            ''
+                                        );
+
+            EXEC [STC].[SpFinalStuffInventory] 
+                @IdForCursor, 'StockReceiptItem',	
+				@ErrorTable = @FinalStuffInventoryErrors;
+					
+			EXEC (N'insert into #error select * from '+@FinalStuffInventoryErrors)			
+			
+            IF EXISTS(SELECT 1 FROM #error)
+			BEGIN
+				SELECT * FROM #error
+				RETURN 
+			END 
+
+        END;
+	SELECT * FROM #error
+    END TRY
+    BEGIN CATCH
+
+        DECLARE @ErrorMessage NVARCHAR(4000);
+        DECLARE @ErrorSeverity INT;
+        DECLARE @ErrorState INT;
+
+        SELECT @ErrorMessage = ERROR_MESSAGE(),
+               @ErrorSeverity = ERROR_SEVERITY(),
+               @ErrorState = ERROR_STATE();
+
+        IF @ErrorState <> 13
+            SET @ErrorState = 13;
+
+		INSERT INTO #error values(@ErrorMessage,0);
+				
+					SELECT * FROM #error
+					RETURN;
+    END CATCH;
+
+END;

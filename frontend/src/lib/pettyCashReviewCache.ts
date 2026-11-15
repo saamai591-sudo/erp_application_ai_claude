@@ -30,7 +30,7 @@ export function setPettyCashReviewSnapshot(snapshot: PettyCashReviewSnapshot) {
   store.set(snapshot);
 }
 
-export function clearPettyCashReviewSnapshot() {
+function clearPettyCashReviewSnapshot() {
   store.clearAll();
 }
 

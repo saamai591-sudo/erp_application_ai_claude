@@ -1,19 +1,13 @@
 import { Router } from "express";
-import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
+import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
-import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { assertDateWithinCurrentFiscalPeriod, requireCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { getConsolidationStart, issueConsolidation, deleteConsolidationFrom, boundaryTitle } from "../services/journalConsolidationService";
 
 const FORM = findFormPrefix("journal-consolidation");
 const router = Router();
-
-async function currentPeriodOrThrow() {
-  const p = await getCurrentFiscalPeriod();
-  if (!p) throw new Error("دوره مالی جاری یافت نشد");
-  return p;
-}
 
 const toDto = (d: any) => ({
   id: d.id,
@@ -36,7 +30,7 @@ const toDto = (d: any) => ({
 // شروع خودکار محدوده (از تاریخ / از شماره سند) + آخرین سند تجمیع‌شده
 router.get("/status", can(`${FORM}.view`), async (_req, res) => {
   try {
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     const start = await getConsolidationStart(prisma, period);
     res.json({ fiscalPeriodId: period.id, fiscalPeriodTitle: period.title, fiscalPeriodFromDate: period.fromDate, fiscalPeriodToDate: period.toDate, ...start });
   } catch (e: any) {
@@ -46,7 +40,7 @@ router.get("/status", can(`${FORM}.view`), async (_req, res) => {
 
 // اسناد تجمیعی صادرشده‌ی دوره مالی جاری
 router.get("/documents", can(`${FORM}.view`), async (_req, res) => {
-  const period = await currentPeriodOrThrow().catch(() => null);
+  const period = await requireCurrentFiscalPeriod().catch(() => null);
   if (!period) return res.json([]);
   const docs = await prisma.consolidatedDocument.findMany({ where: { fiscalPeriodId: period.id }, orderBy: { number: "asc" } });
   res.json(docs.map(toDto));
@@ -67,7 +61,7 @@ router.post("/issue", can(`${FORM}.issue`), async (req: AuthedRequest, res) => {
     if (type !== "DAILY" && type !== "MONTHLY") throw new Error("نوع تجمیع (روزانه یا ماهانه) را انتخاب کنید");
     if (mode === "BY_DATE" && toNumber) throw new Error("روش «از تاریخ تا تاریخ» و «از سند تا سند» هم‌زمان قابل استفاده نیستند");
     if (mode === "BY_DOCUMENT" && toDate) throw new Error("روش «از تاریخ تا تاریخ» و «از سند تا سند» هم‌زمان قابل استفاده نیستند");
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     let to: Date | null = null;
     if (mode === "BY_DATE") {
       if (!toDate) throw new Error("تاریخ پایان محدوده الزامی است");
@@ -87,7 +81,7 @@ router.post("/issue", can(`${FORM}.issue`), async (req: AuthedRequest, res) => {
 // حذف سند تجمیعی: خودِ سند و همه‌ی اسناد تجمیعیِ بعد از آن حذف می‌شوند
 router.delete("/documents/:id", can(`${FORM}.delete`), async (req, res) => {
   try {
-    const period = await currentPeriodOrThrow();
+    const period = await requireCurrentFiscalPeriod();
     const result = await deleteConsolidationFrom(Number(req.params.id), period.id);
     res.json(result);
   } catch (e: any) {

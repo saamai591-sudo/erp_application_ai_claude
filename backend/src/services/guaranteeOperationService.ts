@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
 
 // وضعیت فعلیِ ابزار ضمانت‌نامه = ابزار اصلی + رویدادها: تمدید (سررسید جدید) و عملیات (تقلیل / افزایش / ابطال).
 // چیزی ذخیره نمی‌شود؛ رویدادها به ترتیب (تاریخ سند، زمان ثبت، شناسه) روی هم اعمال می‌شوند.
@@ -21,8 +22,6 @@ export interface EventRef {
   source: "EXT" | "OP";
   id: number;
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export async function instrumentStates(ids: number[], exclude?: EventRef): Promise<Map<number, InstrumentState>> {
   return withoutFiscalPeriodScope(async () => {
@@ -58,8 +57,8 @@ export async function instrumentStates(ids: number[], exclude?: EventRef): Promi
         id: l.id,
         apply: (s: InstrumentState) => {
           const c = Number(l.changeAmount ?? 0);
-          if (l.operation.kind === "REDUCE") s.amount = round2(s.amount - c);
-          else if (l.operation.kind === "INCREASE") s.amount = round2(s.amount + c);
+          if (l.operation.kind === "REDUCE") s.amount = roundToCurrencyDecimals(s.amount - c, 2);
+          else if (l.operation.kind === "INCREASE") s.amount = roundToCurrencyDecimals(s.amount + c, 2);
           else if (l.operation.kind === "CANCEL") { s.amount = 0; s.cancelled = true; }
         },
       })),

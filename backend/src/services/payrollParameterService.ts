@@ -100,7 +100,7 @@ const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "�
  * CALCULATION: مقداری که در فیشِ محاسبه‌شده‌ای به‌کار رفته (فیش تاریخ شروعِ مقدارِ استفاده‌شده را نگه می‌دارد) قابل ویرایش و حذف نیست؛
  * با حذف محاسبه‌ی آن ماه‌ها قفل خودکار آزاد می‌شود.
  */
-export const PARAMETER_VALUE_LOCKS: { key: string; check: (valueId: number) => Promise<string | null> }[] = [
+const PARAMETER_VALUE_LOCKS: { key: string; check: (valueId: number) => Promise<string | null> }[] = [
   {
     key: "CALCULATION",
     check: async (valueId) => {

@@ -9,7 +9,7 @@ import { getRequestContext } from "../lib/requestContext";
 //   (Prisma دسته‌ی تراکنش را به extension نمی‌دهد؛ این‌طوری تغییرِ برگشت‌خورده در درخواستِ شکست‌خورده لاگ نمی‌شود). بیرون از درخواست (کار زمان‌بندی‌شده/اسکریپت) فوری نوشته می‌شود.
 // • خطای نوشتن لاگ هرگز عملیات اصلی را خراب نمی‌کند (فقط در لاگ سرور می‌آید).
 
-export const AUDIT_SCHEMA_SQL = [
+const AUDIT_SCHEMA_SQL = [
   `CREATE SCHEMA IF NOT EXISTS audit`,
   `CREATE SEQUENCE IF NOT EXISTS audit.event_id_seq`,
   `CREATE TABLE IF NOT EXISTS audit.event (
@@ -87,6 +87,9 @@ export const AUDITED_MODELS: Record<string, string> = {
   // تنظیمات حسابداری
   GoodsServiceAccountingSetting: "تنظیم حسابداری کالا و خدمت",
   TreasuryAccountSetting: "تعیین حساب معین خزانه",
+  // دریافت تردد از دستگاه (نگاشت تعیین می‌کند ثبت‌های یک شناسه برای کدام کارمند ثبت شود؛ هش توکن با الگوی حساس‌ها مخفی می‌شود)
+  AttendanceDeviceConnection: "اتصال دستگاه حضور و غیاب",
+  AttendanceDeviceMapping: "نگاشت شناسه‌ی دستگاه",
   AccountingVatRate: "نرخ ارزش افزوده",
   TaxMemory: "حافظه مالیاتی",
 };
@@ -118,7 +121,7 @@ export interface AuditConfig {
 }
 
 let configCache: { at: number; cfg: AuditConfig } | null = null;
-export function invalidateAuditConfig() {
+function invalidateAuditConfig() {
   configCache = null;
 }
 
@@ -176,7 +179,7 @@ async function userNameOf(userId: number | null): Promise<string | null> {
 }
 
 /** ردیف‌ها را می‌نویسد؛ هرگز پرتاب نمی‌کند */
-export async function writeAuditRows(rows: AuditRow[]): Promise<void> {
+async function writeAuditRows(rows: AuditRow[]): Promise<void> {
   if (!rows.length) return;
   try {
     const names = new Map<number, string | null>();
@@ -300,6 +303,128 @@ function touchedRelations(model: string, data: any): string[] {
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
+/** برچسب فارسی نام ارتباط‌های فرزند در خلاصه‌ی لاگ */
+const RELATION_FA: Record<string, string> = { lines: "ردیف‌ها" };
+
+// ─── تفاوت ردیف‌های سند حسابداری (سطح FULL) ──────────────────────────────────────────────────────────────────────────────────────
+
+/** ردیف سند حسابداری به شکلی که برای مقایسه لازم است (هم از دیتابیس هم از ورودی ویرایش می‌آید) */
+export interface AuditJournalLine {
+  accountId: number;
+  detail1Code?: string | null;
+  detail2Code?: string | null;
+  detail3Code?: string | null;
+  currencyId: number;
+  debit: unknown;
+  credit: unknown;
+  fxRate?: unknown;
+  description?: string | null;
+}
+
+const num = (v: unknown) => {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? String(n) : "0";
+};
+const lineKey = (l: AuditJournalLine) =>
+  JSON.stringify([l.accountId, l.detail1Code || null, l.detail2Code || null, l.detail3Code || null, l.currencyId, num(l.debit), num(l.credit), num(l.fxRate ?? 1), (l.description ?? "").trim()]);
+
+/** ردیف‌های فعلی سند را برای مقایسه‌ی بعدی می‌خواند؛ فقط وقتی لاگ فعال و سطح FULL باشد (وگرنه null و بدون هزینه) */
+export async function snapshotJournalLines(entryId: number): Promise<AuditJournalLine[] | null> {
+  try {
+    const cfg = await getAuditConfig();
+    if (!cfg.active || cfg.level !== "FULL") return null;
+    return await rawPrisma.journalEntryLine.findMany({
+      where: { journalEntryId: entryId },
+      orderBy: { rowOrder: "asc" },
+      select: { accountId: true, detail1Code: true, detail2Code: true, detail3Code: true, currencyId: true, debit: true, credit: true, fxRate: true, description: true },
+    });
+  } catch (e) {
+    console.error("[audit] خواندن ردیف‌های سند ناموفق بود", (e as Error).message);
+    return null;
+  }
+}
+
+/**
+ * ردیف‌های قبل و بعد از ویرایش سند را مقایسه می‌کند و تفاوت را (فیلد ← [قبل، بعد]) برای ادغام در ردیف لاگِ خود سند ثبت می‌کند.
+ * ردیف‌های کاملاً یکسان کنار می‌روند؛ باقیمانده‌ها به ترتیب جفت می‌شوند (تغییر فیلد) و اضافه/کم‌ها «افزوده/حذف شد» می‌شوند.
+ * before = null (لاگ خاموش یا سطح پایه) ⇒ کاری نمی‌کند. هرگز پرتاب نمی‌کند.
+ */
+export async function registerJournalLineDiff(entryId: number, before: AuditJournalLine[] | null, after: AuditJournalLine[]): Promise<void> {
+  if (!before) return;
+  try {
+    const ctx = getRequestContext();
+    const map = ctx?.shared;
+    if (!map) return;
+
+    // کنار گذاشتن ردیف‌های یکسان (چندمجموعه‌ای)
+    const afterIdx = after.map((l, i) => ({ l, i }));
+    const beforeLeft: { l: AuditJournalLine; i: number }[] = [];
+    const pool = new Map<string, number[]>();
+    afterIdx.forEach(({ l, i }) => pool.set(lineKey(l), [...(pool.get(lineKey(l)) ?? []), i]));
+    const matchedAfter = new Set<number>();
+    before.forEach((l, i) => {
+      const hit = pool.get(lineKey(l));
+      if (hit?.length) matchedAfter.add(hit.shift()!);
+      else beforeLeft.push({ l, i });
+    });
+    const afterLeft = afterIdx.filter(({ i }) => !matchedAfter.has(i));
+
+    const diff: Record<string, [unknown, unknown]> = {};
+    if (beforeLeft.length || afterLeft.length) {
+      const accIds = new Set<number>();
+      const curIds = new Set<number>();
+      const codes: string[] = [];
+      for (const { l } of [...beforeLeft, ...afterLeft]) {
+        accIds.add(l.accountId);
+        curIds.add(l.currencyId);
+        for (const c of [l.detail1Code, l.detail2Code, l.detail3Code]) if (c) codes.push(c);
+      }
+      const [accs, curs, detailTitles] = await Promise.all([
+        rawPrisma.account.findMany({ where: { id: { in: [...accIds] } }, select: { id: true, code: true, title: true } }),
+        rawPrisma.currency.findMany({ where: { id: { in: [...curIds] } }, select: { id: true, title: true } }),
+        import("../utils/detailValues").then((m) => m.resolveDetailTitles(codes)).catch(() => ({} as Record<string, string>)),
+      ]);
+      const accText = new Map(accs.map((a) => [a.id, `${a.code} — ${a.title}`]));
+      const curText = new Map(curs.map((c) => [c.id, c.title]));
+      const detailText = (c?: string | null) => (c ? (detailTitles[c] ? `${c} — ${detailTitles[c]}` : c) : null);
+      const lineText = (l: AuditJournalLine) =>
+        [
+          accText.get(l.accountId) ?? `حساب ${l.accountId}`,
+          ...[l.detail1Code, l.detail2Code, l.detail3Code].filter(Boolean).map((c) => detailText(c)),
+          `بدهکار ${num(l.debit)}`,
+          `بستانکار ${num(l.credit)}`,
+        ].join("، ");
+
+      const pairs = Math.min(beforeLeft.length, afterLeft.length);
+      for (let k = 0; k < pairs; k++) {
+        const b = beforeLeft[k].l;
+        const { l: a, i } = afterLeft[k];
+        const row = `ردیف ${i + 1}`;
+        const set = (field: string, x: unknown, y: unknown) => {
+          if (x !== y) diff[`${row} · ${field}`] = [x ?? null, y ?? null];
+        };
+        set("حساب", accText.get(b.accountId) ?? `حساب ${b.accountId}`, accText.get(a.accountId) ?? `حساب ${a.accountId}`);
+        set("تفصیل ۱", detailText(b.detail1Code), detailText(a.detail1Code));
+        set("تفصیل ۲", detailText(b.detail2Code), detailText(a.detail2Code));
+        set("تفصیل ۳", detailText(b.detail3Code), detailText(a.detail3Code));
+        set("ارز", curText.get(b.currencyId) ?? null, curText.get(a.currencyId) ?? null);
+        set("بدهکار", num(b.debit), num(a.debit));
+        set("بستانکار", num(b.credit), num(a.credit));
+        set("نرخ ارز", num(b.fxRate ?? 1), num(a.fxRate ?? 1));
+        set("شرح", (b.description ?? "").trim() || null, (a.description ?? "").trim() || null);
+      }
+      for (const { l, i } of beforeLeft.slice(pairs)) diff[`ردیف قبلی ${i + 1} (حذف شد)`] = [lineText(l), null];
+      for (const { l, i } of afterLeft.slice(pairs)) diff[`ردیف ${i + 1} (افزوده شد)`] = [null, lineText(l)];
+    }
+
+    if (!map.auditRelationDiffs) map.auditRelationDiffs = new Map();
+    const key = `JournalEntry:${entryId}`;
+    map.auditRelationDiffs.set(key, { ...(map.auditRelationDiffs.get(key) ?? {}), lines: Object.keys(diff).length ? (capChanges(diff) as Record<string, [unknown, unknown]>) : null });
+  } catch (e) {
+    console.error("[audit] مقایسه‌ی ردیف‌های سند ناموفق بود", (e as Error).message);
+  }
+}
+
 export interface AuditPre {
   before: any | null;
 }
@@ -359,11 +484,22 @@ export async function auditChange(model: string, operation: string, args: any, r
         notes.push(`فیلدها: ${Object.keys(args.data).filter((k) => !SKIP_DIFF_FIELDS.has(k)).join("، ")}`);
       }
     }
+    // تفاوت ردیف‌های فرزند که مسیر ویرایش قبلاً حساب کرده (سطح FULL)؛ جای یادداشت کلیِ «شامل تغییر در: lines» را می‌گیرد
+    const relDiffs = !many && result?.id !== undefined ? ctx?.shared?.auditRelationDiffs?.get(`${model}:${result.id}`) : undefined;
     if (operation === "update" || operation === "create" || operation === "upsert") {
-      const rels = touchedRelations(model, operation === "upsert" ? args?.update ?? args?.create : args?.data);
+      let rels = touchedRelations(model, operation === "upsert" ? args?.update ?? args?.create : args?.data);
+      if (relDiffs) rels = rels.filter((r) => !(r in relDiffs));
       if (rels.length) notes.push(`شامل تغییر در: ${rels.join("، ")}`);
     }
     if (changes && operation === "update") notes.unshift(Object.keys(changes).join("، "));
+    if (relDiffs) {
+      for (const [rel, diff] of Object.entries(relDiffs)) {
+        const n = diff ? Object.keys(diff).length : 0;
+        if (!n) continue;
+        changes = { ...(changes ?? {}), ...diff };
+        notes.push(`${RELATION_FA[rel] ?? rel}: ${n} تغییر`);
+      }
+    }
     // FULL: ذخیره‌ای که هیچ فیلدی را عوض نکرده نویز است
     if (cfg.level === "FULL" && operation === "update" && pre?.before && changes === null && !notes.length) return;
     const baseSummary = many ? `${typeof result?.count === "number" ? result.count : "؟"} رکورد` : null;
@@ -442,7 +578,7 @@ export async function flushAuditBuffer(buffer: AuditRow[]) {
 
 // ─── schema، partition و نگهداری ───────────────────────────────────────────────────────────────────────────────────────────────
 
-export async function ensureAuditSchema() {
+async function ensureAuditSchema() {
   for (const sql of AUDIT_SCHEMA_SQL) await rawPrisma.$executeRawUnsafe(sql);
 }
 
@@ -451,7 +587,7 @@ const monthKey = (y: number, m0: number) => `${y}${pad2(m0 + 1)}`;
 const monthStartUtc = (y: number, m0: number) => new Date(Date.UTC(y, m0, 1));
 
 /** partition ماه جاری و چند ماه بعد را می‌سازد (partition پیش‌فرض بقیه را می‌گیرد؛ ساخت partition وقتی ردیفی از همان بازه در default مانده باشد خطا می‌دهد و فقط لاگ می‌شود) */
-export async function ensureAuditPartitions(monthsAhead = 2) {
+async function ensureAuditPartitions(monthsAhead = 2) {
   const now = new Date();
   for (let i = 0; i <= monthsAhead; i++) {
     const y = now.getUTCFullYear() + Math.floor((now.getUTCMonth() + i) / 12);

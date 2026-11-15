@@ -30,7 +30,7 @@ export default function AttendanceWorksheet() {
   const [tab, setTab] = usePersistedState(`${key}:tab`, "rows");
   const [data, setData] = usePersistedState<WorksheetData | null>(key, null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
 
   async function load() {
     if (!month.year) return;

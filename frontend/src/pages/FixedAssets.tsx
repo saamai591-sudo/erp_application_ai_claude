@@ -96,7 +96,7 @@ function AssetList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text="هر پلاک یک دارایی است؛ کد پلاک همان کد تفصیلی نوع «دارایی ثابت» است." title="تعریف دارایی" />
+          <InfoHint text="هر پلاک یک دارایی است؛ کد پلاک یک عدد ترتیبی است و کد تفصیلی نیست." title="تعریف دارایی" />
           <NewRecordButton path="/fixed-assets/new" />
           <RefreshButton onClick={reload} />
         </div>

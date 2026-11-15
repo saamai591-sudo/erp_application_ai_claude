@@ -65,7 +65,6 @@ export default function FiscalPeriods() {
 
 function PeriodList() {
   const { items, loading, error, remove, reload } = useCrud<Period>("/fiscal-periods");
-  const navigate = useNavigate();
   const lastPeriod = [...items].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
 
   return (

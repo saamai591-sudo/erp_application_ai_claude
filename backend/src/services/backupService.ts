@@ -4,13 +4,14 @@ import path from "path";
 import { prisma } from "../lib/prisma";
 import { computeNextRun, ScheduleSpec, validateSchedule } from "../jobs/schedule";
 import { tehranParts } from "../jobs/time";
+import { getAppVersion } from "../lib/appVersion";
 
 // پشتیبان‌گیری خودکار از دیتابیس. سیاست فقط از صفحه‌ی «مدیریت» (/management) تنظیم می‌شود (routes/managementBackup.ts).
 //  • فرمت: pg_dump -Fc بدون رمزنگاری (تصمیم صریح کاربر) — محافظت = دسترسی فایل سیستم + دانلود فقط با رمز مدیریت.
 //  • اجرا داخل همین پروسه است و به SCHEDULER_ENABLED (کارهای زمان‌بندی‌شده) و وضعیت لایسنس وابسته نیست.
 //  • فایل‌ها در BACKUP_DIR (پیش‌فرض /backups) می‌مانند؛ باید یک volume جدا باشد وگرنه با ساخت دوباره‌ی کانتینر پاک می‌شوند.
 
-export const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
+const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
 const TICK_MS = 60_000;
 const MIN_FREE_BYTES = 100 * 1024 * 1024;
 const MAX_RUN_ROWS = 1000;
@@ -29,14 +30,6 @@ export interface PolicyInput {
 }
 
 // ─── ابزار ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-function appVersion(): string {
-  try {
-    return JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "..", "package.json"), "utf8")).version || "";
-  } catch {
-    return "";
-  }
-}
 
 /** پارامترهای اتصال pg_* از DATABASE_URL (رمز فقط در متغیر محیطیِ پروسه‌ی فرزند، نه آرگومان) */
 function pgEnv(database?: string): NodeJS.ProcessEnv {
@@ -86,7 +79,7 @@ function run(cmd: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs = 60
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** نام فایل با ساعت دیواری تهران: erp-20261115-020000-v1.24.0.dump */
-export function backupFileName(date: Date, version: string): string {
+function backupFileName(date: Date, version: string): string {
   const p = tehranParts(date);
   return `erp-${p.year}${pad(p.month)}${pad(p.day)}-${pad(p.hour)}${pad(p.minute)}${pad(new Date(date).getUTCSeconds())}-v${version || "x"}.dump`;
 }
@@ -111,7 +104,7 @@ export async function audit(action: string, detail?: string, ip?: string | null)
 
 // ─── سیاست ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function policyToSpec(p: Pick<PolicyInput, "frequency" | "intervalHours" | "timeOfDay" | "weekdays">): ScheduleSpec {
+function policyToSpec(p: Pick<PolicyInput, "frequency" | "intervalHours" | "timeOfDay" | "weekdays">): ScheduleSpec {
   if (p.frequency === "INTERVAL") return { type: "INTERVAL", intervalMinutes: p.intervalHours * 60 };
   return { type: p.frequency, timeOfDay: p.timeOfDay, weekdays: p.frequency === "WEEKLY" ? p.weekdays : null };
 }
@@ -123,7 +116,7 @@ export async function getPolicy() {
 }
 
 /** پیام خطای فارسی یا null */
-export function validatePolicy(p: PolicyInput): string | null {
+function validatePolicy(p: PolicyInput): string | null {
   if (!["INTERVAL", "DAILY", "WEEKLY"].includes(p.frequency)) return "نوع تکرار نامعتبر است";
   if (p.frequency === "INTERVAL" && (!Number.isInteger(p.intervalHours) || p.intervalHours < 1 || p.intervalHours > 24 * 31)) {
     return "فاصله‌ی پشتیبان‌گیری باید عددی صحیح بین ۱ و ۷۴۴ ساعت باشد";
@@ -217,7 +210,7 @@ export function isBackupRunning(): boolean {
 export async function runBackup(trigger: "SCHEDULED" | "MANUAL") {
   if (running) throw new BackupError("یک پشتیبان‌گیری دیگر در حال اجراست");
   running = true;
-  const version = appVersion();
+  const version = getAppVersion();
   const startedAt = new Date();
   const row = await prisma.backupRun.create({ data: { trigger, status: "RUNNING", startedAt, appVersion: version || null } });
   let tmp: string | null = null;
@@ -261,7 +254,7 @@ export async function runBackup(trigger: "SCHEDULED" | "MANUAL") {
 // ─── نگه‌داری ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** نسخه‌های موفقِ باقی‌مانده: keepRecent جدیدترین + جدیدترین نسخه‌ی هر یک از keepMonthly ماهِ اخیر؛ بقیه حذف می‌شوند */
-export async function applyRetention() {
+async function applyRetention() {
   const policy = await getPolicy();
   const keepRecent = Math.max(2, policy.keepRecent);
   const runs = await prisma.backupRun.findMany({

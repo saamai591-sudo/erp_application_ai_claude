@@ -389,7 +389,6 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
       : [{ from: "0", to: "", rate: "" }]
   );
   const [err, setErr] = useState<string | null>(null);
-  const num = (s: string) => s.replace(/[^0-9.]/g, "");
 
   // «از» هر پله همیشه برابر «تا»ی پله‌ی قبل است
   function setRow(i: number, p: Partial<{ to: string; rate: string }>) {

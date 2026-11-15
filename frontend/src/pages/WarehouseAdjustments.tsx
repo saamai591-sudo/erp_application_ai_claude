@@ -22,6 +22,8 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
+import { recomputeAmount } from "../lib/rowHelpers";
 
 // «اضافات انبارگردانی» — طبق تصمیم صریح کاربر، دقیقاً هم‌الگوی موجودی اول دوره/رسید تولید:
 // بدون مقایسه با موجودی سیستمی؛ کاربر مستقیماً مقدار مازاد هر ردیف را وارد می‌کند (بدون مبنا). این سند
@@ -108,14 +110,6 @@ export default function WarehouseAdjustments() {
   if (isNew) return <WarehouseAdjustmentForm basePath={basePath} />;
   if (isEdit) return <WarehouseAdjustmentForm basePath={basePath} editId={Number(id)} />;
   return <WarehouseAdjustmentList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 function WarehouseAdjustmentList({ basePath }: { basePath: string }) {
@@ -242,15 +236,6 @@ function mapRows(d: Detail): RowState[] {
 
 // طبق بند ۳-۴ «مستند عمومی عملیات انبار»: مبلغ باید بر اساس تعداد ارقام اعشار «ارز پایه» گرد شود، نه
 // یک عدد هاردکد. این تابع فقط برای پیش‌نمایش لحظه‌ای در فرانت‌اند است؛ مرجع نهایی محاسبه، بک‌اند است.
-function recomputeAmount(row: RowState, baseDecimalPlaces: number): RowState {
-  const qty = Number(row.quantity) || 0;
-  const cost = Number(row.unitCost) || 0;
-  if (!qty) return { ...row, amount: "" };
-  const factor = Math.pow(10, baseDecimalPlaces);
-  const amount = Math.round(qty * cost * factor) / factor;
-  return { ...row, amount: amount ? String(amount) : "" };
-}
-
 function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePath: string }) {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
@@ -262,7 +247,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
 
   const detailConfig = useDocDetailConfig("WAREHOUSE_ADJUSTMENT");
-  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, flash, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, setMeta, error, setError, loaded, flash, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; description: string; details: DetailValues },
     RowState,
     Detail

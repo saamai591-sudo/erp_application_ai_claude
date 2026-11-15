@@ -15,6 +15,7 @@ import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { appendSortParams } from "../lib/gridSort";
 import { ColumnFilterType, ActiveFilter } from "../components/DataTable";
+import { SignedCell, numCol } from "../components/reviewColumns";
 
 // گزارش «مرور صندوق» (خزانه‌داری > گزارش) — هم‌الگوی «مرور حساب بانکی» با دو تب: «صندوق» (مانده ابتدا/دریافت/
 // پرداخت/مانده به‌ازای هر صندوق) و «گردش» (فهرست تخت گردش‌ها با مانده‌ی جاری، صفحه‌بندی و فیلتر سمت سرور).
@@ -59,23 +60,6 @@ const INFO_TEXT =
 const DOC_ROUTE: Record<string, string> = { RECEIPT: "/receipts", PAYMENT: "/payments" };
 
 /** اعداد منفی به‌شکل متعارف حسابداری (داخل پرانتز و قرمز) — کلاس olap-amount-negative از قبل در styles.css هست. */
-function SignedCell({ value }: { value: number }) {
-  const negative = value < 0;
-  const text = negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value);
-  return <span className={negative ? "olap-amount-negative" : undefined}>{text}</span>;
-}
-
-function numCol(header: string, field: keyof CashRow, signed = false): BalanceTableColumn<CashRow> {
-  return {
-    header,
-    render: (r) => (signed ? <SignedCell value={(r[field] as number) || 0} /> : formatAmountFa((r[field] as number) || 0)),
-    sortValue: (r) => (r[field] as number) || 0,
-    filterType: "number",
-    filterValue: (r) => (r[field] as number) || 0,
-    decimal: true,
-  };
-}
-
 // کلیدها باید دقیقاً با LEDGER_COLUMN_DEFS در backend/src/routes/cashReview.ts یکی باشند
 const LEDGER_COLUMNS: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
   { header: "نوع", field: "type", render: (r) => <span className="badge">{r.type}</span>, sortValue: (r) => r.type, filterType: "string", filterValue: (r) => r.type },

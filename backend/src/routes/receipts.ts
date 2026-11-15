@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsage";
@@ -15,6 +14,9 @@ import { assertUsedInstrumentsUnchanged } from "../utils/instrumentLock";
 import { findFormPrefix } from "../authz/registry";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
 import { RECEIPT_DOC_INCLUDE, receiptLineDoc } from "../services/settlementDocRef";
+import { getBaseCurrency, resolveFxRate } from "../services/baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
+import { runRouteHandler } from "../utils/internalHandler";
 
 const FORM = findFormPrefix("receipts");
 
@@ -60,16 +62,8 @@ const FORM = findFormPrefix("receipts");
 
 const router = Router();
 
-/** اجرای داخلی یکی از handlerهای تایید/برگشت (همان منطق، بدون HTTP)؛ خطا با همان پیام handler پرتاب می‌شود */
-async function runInternal(handler: (req: any, res: any) => Promise<any>, id: number) {
-  let status = 200;
-  let body: any;
-  const res: any = { status(c: number) { status = c; return res; }, json(b: any) { body = b; return res; }, send() { return res; } };
-  await handler({ params: { id: String(id) }, body: {} }, res);
-  if (status >= 400) throw new Error(body?.error || "خطا");
-}
-const approveCore = (id: number) => runInternal(receiptApproveHandler, id);
-const unapproveCore = (id: number) => runInternal(receiptUnapproveHandler, id);
+const approveCore = (id: number) => runRouteHandler(receiptApproveHandler, id);
+const unapproveCore = (id: number) => runRouteHandler(receiptUnapproveHandler, id);
 const ACCOUNTING_LOCK_MESSAGE = "این سند «تایید حسابداری» شده است؛ ابتدا «لغو تایید حسابداری» را بزنید";
 
 interface InstrumentLineInput {
@@ -113,28 +107,6 @@ interface HeaderBody {
 }
 
 type BasisType = "NONE" | "SALES_INVOICE" | "PURCHASE_INVOICE" | "SALES_ORDER" | "PROFORMA_INVOICE";
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
-
-async function getBaseCurrency() {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-  return baseCurrency;
-}
-
-/** طبق Documents/تبدیل ارز.md — اگر ارز ردیف همان ارز پایه باشد نرخ همیشه ۱ است، در غیر این‌صورت کاربر باید نرخ را وارد کند */
-function resolveFxRate(currencyId: number, baseCurrencyId: number, bodyFxRate: number | null | undefined): number {
-  if (currencyId === baseCurrencyId) return 1;
-  const fxRate = Number(bodyFxRate);
-  if (!(fxRate > 0)) throw new Error("نرخ ارز الزامی است");
-  return fxRate;
-}
 
 // =========================================================================
 // ردیف‌های اقلام دریافت (ابزار پرداخت)
@@ -625,10 +597,6 @@ export async function validateSubjectLines(
   return cleaned;
 }
 
-function partyDisplay(p: any) {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 // =========================================================================
 // CRUD + تایید/برگشت از تایید
 // =========================================================================
@@ -644,7 +612,7 @@ router.get("/receipts", can(`${FORM}.view`), async (_req, res) => {
       number: d.number,
       date: d.date,
       partyId: d.partyId,
-      partyDisplay: partyDisplay(d.party),
+      partyDisplay: partyTitle(d.party),
       fiscalPeriodTitle: d.fiscalPeriod.title,
       description: d.description,
       status: d.status,
@@ -674,7 +642,7 @@ function serializeReceipt(d: any) {
     number: d.number,
     date: d.date,
     partyId: d.partyId,
-    partyDisplay: partyDisplay(d.party),
+    partyDisplay: partyTitle(d.party),
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
@@ -712,7 +680,7 @@ function serializeReceipt(d: any) {
       receiptTypeId: l.receiptTypeId,
       receiptTypeTitle: l.receiptType.title,
       partyId: l.partyId,
-      partyDisplay: partyDisplay(l.party),
+      partyDisplay: partyTitle(l.party),
       salesInvoiceId: l.salesInvoiceId,
       salesInvoiceNumber: l.salesInvoice?.number,
       purchaseInvoiceId: l.purchaseInvoiceId,
@@ -745,7 +713,7 @@ router.post("/receipts", can(`${FORM}.create`), async (req, res) => {
 
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف حساب یافت نشد");
 
@@ -815,7 +783,7 @@ router.put("/receipts/:id", can(`${FORM}.edit`), async (req, res) => {
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف حساب یافت نشد");
 
@@ -917,7 +885,7 @@ async function receiptApproveHandler(req: any, res: any) {
   if (d.instrumentLines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف ابزار پرداخت داشته باشد" });
 
   try {
-    await resolveFiscalPeriod(d.date);
+    await resolveDocumentFiscalPeriod(d.date);
     const approveBaseCurrency = await getBaseCurrency();
 
     // بازبینی مانده‌ی سند مبنای هر ردیف موضوعات دریافت در لحظه‌ی تایید (ممکن است از زمان ثبت تغییر کرده
@@ -1107,7 +1075,7 @@ router.put("/receipts/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
   try {
     const { existing, editable, locked } = await loadReEditContext(id);
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
-    await resolveFiscalPeriod(existing.date);
+    await resolveDocumentFiscalPeriod(existing.date);
     const baseCurrency = await getBaseCurrency();
 
     const editableById = new Map<number, any>(editable.map((l: any) => [l.id, l]));

@@ -40,10 +40,6 @@ async function titleForEntity(entityTable: string, entityId: number): Promise<st
       const p = await prisma.project.findUnique({ where: { id: entityId } });
       return p?.title || "—";
     }
-    case "FixedAsset": {
-      const fa = await prisma.fixedAsset.findUnique({ where: { id: entityId }, select: { title: true } });
-      return fa?.title || "—";
-    }
     case "FiscalPeriod": {
       const fp = await prisma.fiscalPeriod.findUnique({ where: { id: entityId } });
       return fp?.title || "—";
@@ -75,21 +71,10 @@ export async function getDetailOptions(detailTypeId: number): Promise<{ code: st
 }
 
 /** عنوان قابل‌نمایش برای یک کد تفصیلی مشخص */
-export async function resolveDetailTitle(code: string): Promise<string | null> {
+async function resolveDetailTitle(code: string): Promise<string | null> {
   const usage = await prisma.detailCodeUsage.findUnique({ where: { code } });
   if (!usage) return null;
   return titleForEntity(usage.entityTable, usage.entityId);
-}
-
-/** رزولوشن یک کد تفصیلی به رکورد واقعی‌اش، با اطمینان از اینکه از نوع موجودیت مورد انتظار است
- * (مثلاً کد وارد شده برای «طرف مقابل» باید واقعاً به یک Party اشاره کند، نه CostCenter/Project) */
-export async function resolveDetailEntity(
-  code: string,
-  expectedTable: "Party" | "CostCenter" | "Project"
-): Promise<{ id: number } | null> {
-  const usage = await prisma.detailCodeUsage.findUnique({ where: { code } });
-  if (!usage || usage.entityTable !== expectedTable) return null;
-  return { id: usage.entityId };
 }
 
 /** نسخه‌ی دسته‌ای resolveDetailEntity، برای صفحات فهرست که چندین کد تفصیلی را یکجا باید به شناسه‌ی
@@ -176,8 +161,8 @@ export async function resolveAccountDetailFieldsForCodes(
 export const DETAIL_TYPE_CODE_PARTY = 1;
 export const DETAIL_TYPE_CODE_COST_CENTER = 2;
 export const DETAIL_TYPE_CODE_PROJECT = 8;
-export const DETAIL_TYPE_CODE_PETTY_CASH = 5;
-export const DETAIL_TYPE_CODE_PETTY_CASH_CUSTODIAN = 6;
+const DETAIL_TYPE_CODE_PETTY_CASH = 5;
+const DETAIL_TYPE_CODE_PETTY_CASH_CUSTODIAN = 6;
 
 const systemDetailTypeIdCache = new Map<number, number>();
 

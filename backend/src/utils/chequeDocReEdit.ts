@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertRecordNotStale } from "./concurrency";
+import { resolveDocumentFiscalPeriod } from "./fiscalPeriodValidation";
 import { can } from "../authz/guard";
 
 // =========================================================================
@@ -14,7 +15,7 @@ import { can } from "../authz/guard";
 // (برگشت وضعیت چک) و در اسناد نتیجه‌ی وصول، تغییر «نتیجه» مجاز است.
 // =========================================================================
 
-export const NO_EDITABLE_CHEQUES_MESSAGE = "همه آیتم‌ها دارای گردش هستند و امکان ویرایش مجدد وجود ندارد.";
+const NO_EDITABLE_CHEQUES_MESSAGE = "همه آیتم‌ها دارای گردش هستند و امکان ویرایش مجدد وجود ندارد.";
 
 export interface ChequeDocReEditConfig {
   path: string; // مثلاً "cheque-deposits"
@@ -28,7 +29,6 @@ export interface ChequeDocReEditConfig {
   hasOutcome: boolean;
   /** وضعیتی که چک با حذف ردیف از سند به آن برمی‌گردد */
   revertStatus: string;
-  resolveFiscalPeriod: (date: Date) => Promise<unknown>;
 }
 
 // جدول‌های ردیفِ اسنادی که ممکن است به یک چک ارجاع بدهند (پیش‌نویس‌ها، برای شناسایی «گردش» در حال انجام)
@@ -87,7 +87,7 @@ export function registerChequeDocReEdit(router: Router, cfg: ChequeDocReEditConf
     try {
       const { existing, editable, locked } = await loadContext(id);
       assertRecordNotStale(existing.updatedAt, body.updatedAt, "این سند");
-      await cfg.resolveFiscalPeriod(existing.date);
+      await resolveDocumentFiscalPeriod(existing.date);
 
       const incoming: { chequeItemId: number; outcome?: string }[] = cfg.hasOutcome
         ? Array.isArray(body.lines) ? body.lines : []

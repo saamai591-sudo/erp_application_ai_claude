@@ -12,6 +12,7 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { partyTitleOrNull } from "../utils/partyTitle";
 
 const FORM = findFormPrefix("sales-returns");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -119,11 +120,6 @@ async function validateLines(warehouseId: number, lines: LineInput[], partyDetai
   return cleaned;
 }
 
-function partyTitle(p: any): string | null {
-  if (!p) return null;
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 router.get("/sales-returns/pickable-lines", can(`${FORM}.view`), async (req, res) => {
   const warehouseId = req.query.warehouseId ? Number(req.query.warehouseId) : null;
   // فقط حواله‌های فروشِ همان طرف مقابل سرصفحه (partyId)؛ بدون طرف مقابل هیچ ردیفی برنمی‌گردد
@@ -183,7 +179,7 @@ router.get("/sales-returns", can(`${FORM}.view`), async (req: AuthedRequest, res
         warehouseTitle: d.warehouse.title,
         fiscalPeriodTitle: d.fiscalPeriod.title,
         partyId,
-        partyTitle: partyTitle(partyId ? partyById.get(partyId) : null),
+        partyTitle: partyTitleOrNull(partyId ? partyById.get(partyId) : null),
         description: d.description,
         status: d.status,
         lineCount: d.lines.length,
@@ -231,7 +227,7 @@ router.get("/sales-returns/:id", can(`${FORM}.view`), async (req: AuthedRequest,
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     partyId,
-    partyTitle: partyTitle(party),
+    partyTitle: partyTitleOrNull(party),
     description: d.description,
     status: d.status,
     finalizedAt: d.finalizedAt,

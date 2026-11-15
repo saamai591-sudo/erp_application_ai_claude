@@ -1,4 +1,5 @@
 import { displayDate } from "../utils/dateDisplay";
+import { partyTitle } from "../utils/partyTitle";
 
 // جدول برچسب «موارد استفاده» برای پیام حذف (lib/deleteUsage.ts). هر مدلی که اینجا نباشد هم کار می‌کند (با برچسبِ پیش‌فرض «رکورد <نام مدل>»)،
 // ولی برای پیام فارسی و خوانا مدل‌های تازه باید یک خط اینجا اضافه شوند:
@@ -20,11 +21,9 @@ const num = (r: any) => `شماره ${r.number}${r.date instanceof Date ? ` (${d
 const EMP = { employee: { select: { personnelCode: true } } };
 /** پسوند «— کارمند <کد>» برای رکوردهای پرسنلی (include: EMP) */
 const ofEmp = (r: any) => (r.employee ? ` — کارمند ${r.employee.personnelCode}` : "");
-const partyName = (p: any) => (p ? [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "" : "");
-
 export const USAGE_META: Record<string, UsageMeta> = {
   // منابع انسانی و حقوق
-  Employee: { label: "کارمند", base: "/employees", include: { party: { select: { firstName: true, lastName: true, name: true } } }, title: (r) => `${r.personnelCode}${r.party ? ` — ${partyName(r.party)}` : ""}` },
+  Employee: { label: "کارمند", base: "/employees", include: { party: { select: { firstName: true, lastName: true, name: true } } }, title: (r) => `${r.personnelCode}${r.party ? ` — ${partyTitle(r.party)}` : ""}` },
   EmployeeStatusRecord: { label: "سابقه‌ی وضعیت همکاری", include: EMP, title: (r) => `از ${displayDate(r.effectiveDate)}${ofEmp(r)}` },
   EmployeeAssignment: { label: "انتصاب کارمند", include: EMP, title: (r) => `از ${displayDate(r.fromDate)}${ofEmp(r)}` },
   EmployeeDependent: { label: "وابسته‌ی کارمند", include: EMP, title: (r) => `${r.firstName} ${r.lastName}${ofEmp(r)}` },
@@ -70,6 +69,8 @@ export const USAGE_META: Record<string, UsageMeta> = {
   AttendanceFactor: { label: "عامل تردد", base: "/attendance-factors" },
   AttendanceFactorMethod: { label: "روش محاسبه‌ی تردد", base: "/attendance-methods", title: (r) => `#${r.id}` },
   AttendancePunch: { label: "تردد", base: "/attendance-punches", title: (r) => `#${r.id}` },
+  AttendanceDeviceConnection: { label: "اتصال دستگاه حضور و غیاب", base: "/attendance-device-connections", title: (r) => String(r.name ?? "") },
+  AttendanceDeviceMapping: { label: "نگاشت شناسه‌ی دستگاه", base: "/attendance-device-mappings", title: (r) => String(r.deviceUserId ?? "") },
   AttendanceCorrectionRequest: { label: "درخواست اصلاح تردد", base: "/attendance-correction-requests", title: (r) => `شماره ${r.number}` },
   PositionJob: { label: "شغل مورد نیاز پست", title: (r) => `#${r.id}` },
   OrgUnit: { label: "واحد سازمانی", base: "/org-units" },
@@ -104,11 +105,11 @@ export const USAGE_META: Record<string, UsageMeta> = {
   PayrollJournalTemplate: { label: "رکورد الگوی سند حقوق", base: "/payroll-journal-templates", title: (r) => `#${r.id}` },
   PayrollIssueSetting: { label: "تنظیمات صدور سند", base: "/payroll-issue-settings", include: EMP, title: (r) => `#${r.id}${ofEmp(r)}` },
   // اطلاعات پایه
-  Party: { label: "شخص / طرف‌حساب", title: (r) => r.detailTitle || partyName(r) || r.detailCode },
-  Customer: { label: "مشتری", base: "/customers", include: { party: { select: { firstName: true, lastName: true, name: true, detailTitle: true } } }, title: (r) => r.party?.detailTitle || partyName(r.party) || `#${r.id}` },
+  Party: { label: "شخص / طرف‌حساب", title: (r) => r.detailTitle || partyTitle(r) || r.detailCode },
+  Customer: { label: "مشتری", base: "/customers", include: { party: { select: { firstName: true, lastName: true, name: true, detailTitle: true } } }, title: (r) => r.party?.detailTitle || partyTitle(r.party) || `#${r.id}` },
   CustomerGroup: { label: "گروه مشتری", base: "/customer-groups", title: (r) => r.title },
   SupplierGroup: { label: "گروه تامین‌کننده", base: "/supplier-groups", title: (r) => r.title },
-  Supplier: { label: "تامین‌کننده", base: "/suppliers", include: { party: { select: { firstName: true, lastName: true, name: true, detailTitle: true } } }, title: (r) => r.party?.detailTitle || partyName(r.party) || `#${r.id}` },
+  Supplier: { label: "تامین‌کننده", base: "/suppliers", include: { party: { select: { firstName: true, lastName: true, name: true, detailTitle: true } } }, title: (r) => r.party?.detailTitle || partyTitle(r.party) || `#${r.id}` },
   CashBox: { label: "صندوق", base: "/cash-boxes" },
   BankAccount: { label: "حساب بانکی", base: "/bank-accounts" },
   BankBranch: { label: "شعبه بانک", base: "/bank-branches" },
@@ -152,6 +153,19 @@ export const USAGE_META: Record<string, UsageMeta> = {
   AssetGroup: { label: "گروه حسابداری دارایی", base: "/asset-groups" },
   AssetReceipt: { label: "رسید دارایی", base: "/asset-receipts" },
   FixedAsset: { label: "دارایی", base: "/fixed-assets" },
+  Bom: { label: "فرمول ساخت", base: "/boms" },
+  Batch: { label: "بچ", base: "/batches", title: (r) => String(r.batchNumber ?? "") },
+  ProductionOrder: { label: "دستور تولید", base: "/production-orders" },
+  ProductionStat: { label: "آمار تولید", base: "/production-stats" },
+  ProductionDelivery: { label: "تحویل تولید", base: "/production-deliveries" },
+  CostStructureNode: { label: "شاخه‌ی ساختار بهای تمام‌شده", base: "/cost-structure" },
+  CostAccountRule: { label: "قاعده‌ی عامل جمع‌آوری معین", base: "/cost-collectors" },
+  CostTimeDriver: { label: "مبنای زمانی تسهیم", base: "/cost-time-drivers" },
+  ProductionTimeSheet: { label: "برگه‌ی زمان‌بندی تولید", base: "/production-time-sheets" },
+  ProductionTimeLine: { label: "برگه‌ی زمان‌بندی تولید", base: "/production-time-sheets" },
+  WipCount: { label: "موجودی پای کار", base: "/wip-counts" },
+  ItemPlanning: { label: "پارامتر برنامه‌ریزی کالا", base: "/item-planning" },
+  MrpRun: { label: "اجرای MRP", base: "/mrp-runs" },
   AssetPosition: { label: "موقعیت دارایی", base: "/asset-positions" },
   AssetInsuranceType: { label: "نوع بیمه‌ی دارایی", base: "/asset-insurance-types" },
   AssetAccountSetting: { label: "حساب دارایی ثابت", base: "/asset-account-settings" },

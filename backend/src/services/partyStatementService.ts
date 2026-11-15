@@ -5,6 +5,7 @@ import { displayDate } from "../utils/dateDisplay";
 import { BANK_ACCOUNT_TITLE_INCLUDE, bankAccountDetailTitle } from "../utils/detailValues";
 import { PartyBalanceRole, ROLES, ROLE_TITLE, RECEIPT_NATURE_ROLE, PAYMENT_NATURE_ROLE, chequeBounceEvents, openingMovements } from "./partyBalanceService";
 import { ReportScope } from "./partyBalanceReportService";
+import { parseIsoDay } from "../utils/inputParse";
 
 // =========================================================================
 // «صورتحساب طرف‌حساب» — ریز گردش یک طرف‌حساب در یک ارز (مشتری / تامین‌کننده / جامع). هم‌منبع با گزارش «مانده» (partyBalanceService):
@@ -15,7 +16,7 @@ import { ReportScope } from "./partyBalanceReportService";
 // =========================================================================
 
 export type StatementLevel = "TOTAL" | "DETAIL";
-export const MAX_STATEMENT_ROWS = 50000;
+const MAX_STATEMENT_ROWS = 50000;
 
 export interface StatementQuery {
   partyId: number;
@@ -89,11 +90,7 @@ export interface StatementRow {
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-const toDate = (s: string, label: string) => {
-  const d = new Date(`${s.slice(0, 10)}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) throw new Error(`${label} نامعتبر است`);
-  return d;
-};
+const toDate = (s: string, label: string): Date => parseIsoDay(s, label) as Date;
 const n = (v: any) => Number(v ?? 0);
 const join = (...p: (string | null | undefined)[]) => p.map((x) => (x ?? "").trim()).filter(Boolean).join(" ");
 

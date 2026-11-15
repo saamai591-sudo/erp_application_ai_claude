@@ -38,7 +38,6 @@ function CostCenterList() {
   const cacheKey = "/cost-centers";
   const [items, setItems] = usePersistedState<CostCenter[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/cost-centers").then(setItems).catch((e) => setError(e.message));
@@ -58,7 +57,6 @@ function CostCenterList() {
     }
   }
 
-  const TYPE_FA_REVERSE: Record<string, string> = Object.fromEntries(Object.entries(TYPE_FA).map(([k, v]) => [v, k]));
 
   return (
     <div>

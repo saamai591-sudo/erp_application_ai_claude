@@ -1,9 +1,10 @@
-import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
+import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { getBankMovements, loadBankAccounts } from "./bankAccountReviewService";
 import { getCashMovements } from "./cashReviewService";
 import { getPettyCashMovements } from "./pettyCashReviewService";
 import { findChequeUses } from "../utils/chequeUsage";
+import { getCloseContext } from "../utils/fiscalPeriodValidation";
 
 // =========================================================================
 // «بستن سال دریافت و پرداخت» — Documents/افتتاحیه دریافت و پرداخت و بستن سال.md
@@ -39,13 +40,6 @@ export const sectionTitle = (s: CloseSection) => SECTION_TITLE[s];
 const ACTIVE_RECEIVABLE = ["IN_HAND", "IN_COLLECTION", "BOUNCED"] as const;
 const ACTIVE_PAYABLE = ["ISSUED"] as const;
 
-export async function getCloseContext() {
-  const current = await getCurrentFiscalPeriod();
-  if (!current) throw new Error("دوره مالی جاری مشخص نیست");
-  const next = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { gt: current.toDate } }, orderBy: { fromDate: "asc" } });
-  return { current, next };
-}
-
 async function requireNext() {
   const ctx = await getCloseContext();
   if (!ctx.next) throw new Error("دوره مالی بعد تعریف نشده است؛ ابتدا دوره مالی سال بعد را تعریف کنید");
@@ -76,7 +70,7 @@ export async function previewCounts(current: { id: number; fromDate: Date; toDat
   return { BANK_ACCOUNTS: bank.length, CASH_BOXES: cash.length, PETTY_CASHES: pettyCash.length, RECEIVABLE_CHEQUES: receivable, PAYABLE_CHEQUES: payable } as Record<CloseSection, number>;
 }
 
-export async function computeBankClosing(current: { fromDate: Date; toDate: Date }) {
+async function computeBankClosing(current: { fromDate: Date; toDate: Date }) {
   const [movements, accounts, base] = await Promise.all([
     getBankMovements(current.toDate, current.fromDate),
     loadBankAccounts(),
@@ -100,7 +94,7 @@ export async function computeBankClosing(current: { fromDate: Date; toDate: Date
     .filter((r) => r.balance !== 0 || r.baseBalance !== 0);
 }
 
-export async function computeCashClosing(current: { fromDate: Date; toDate: Date }) {
+async function computeCashClosing(current: { fromDate: Date; toDate: Date }) {
   const movements = await getCashMovements(current.toDate, current.fromDate);
   const totals = new Map<string, { cashBoxId: number; currencyId: number; base: number; cur: number }>();
   for (const m of movements) {
@@ -116,7 +110,7 @@ export async function computeCashClosing(current: { fromDate: Date; toDate: Date
     .filter((r) => r.balance !== 0 || r.baseBalance !== 0);
 }
 
-export async function computePettyCashClosing(current: { fromDate: Date; toDate: Date }) {
+async function computePettyCashClosing(current: { fromDate: Date; toDate: Date }) {
   // مانده‌ی پایان سال در سطح «تنخواه‌دار» (افتتاحیه‌ی تنخواه هم در سطح تنخواه‌دار است)؛ افتتاحیه‌ی دوره‌ی بعد (تاریخش = آخرین روز همین دوره) در مانده‌ی بستن اثر نمی‌گذارد
   const [movements, custodians, base] = await Promise.all([
     getPettyCashMovements(current.toDate, { openingsBeforeDate: current.toDate }),

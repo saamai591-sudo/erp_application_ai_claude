@@ -9,6 +9,9 @@ import { applyDocumentEffects, assertSafeToApplyEffects, assertSafeToReverseEffe
 import { recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 import { StoreSaleError, saleTotals } from "./storeSaleService";
 import { returnTotals } from "./storeReturnService";
+import { getBaseCurrencyDecimals } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
+import { parseDateOnlyUtc } from "../utils/inputParse";
 
 // فروش فروشگاهی › «تحویل فروش» — تنها محل قواعد. یک تحویل = همه‌ی فروش‌ها و دریافت‌های تحویل‌نشده‌ی یک ایستگاه تا «تاریخ» (کاربر ایستگاه و تاریخ را در پنجره‌ی اول می‌دهد؛ دکمه‌ی «لود» ندارد).
 // • فروش‌های تب فروش: تاریخ ≤ تاریخ تحویل و هنوز در هیچ تحویلی نیامده؛ دریافت‌ها: تاریخ ≤ تاریخ تحویل و هنوز در هیچ تحویلی نیامده (حتی دریافتِ فروشی که پیش‌تر تحویل شده).
@@ -23,7 +26,7 @@ const EPS = 1e-6;
 const dayStr = (d: Date) => d.toISOString().slice(0, 10);
 
 /** روش‌های دریافت؛ ابزار دریافت تازه = یک ردیف اینجا + یک ستون/تب خودکار در فرم */
-export const DELIVERY_METHODS = [
+const DELIVERY_METHODS = [
   { key: "CASH", title: "صندوق" },
   { key: "CARD", title: "کارتخوان" },
   { key: "TRANSFER", title: "حواله" },
@@ -33,22 +36,11 @@ export const DELIVERY_METHODS = [
 type MethodKey = (typeof DELIVERY_METHODS)[number]["key"];
 const methodOf = (r: any): MethodKey => (r.loyaltyChargeId ? "LOYALTY" : r.voucherId ? "VOUCHER" : r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH");
 
-export const SETTLEMENT_STATUSES = ["SETTLED", "TO_CUSTOMER", "TO_ISSUER", "CASH_SHORTAGE"] as const;
+const SETTLEMENT_STATUSES = ["SETTLED", "TO_CUSTOMER", "TO_ISSUER", "CASH_SHORTAGE"] as const;
 type Settlement = (typeof SETTLEMENT_STATUSES)[number];
 const UNSETTLED_CHOICES: Settlement[] = ["TO_CUSTOMER", "TO_ISSUER", "CASH_SHORTAGE"];
 
-function parseDate(raw: unknown): Date {
-  const d = new Date(String(raw ?? ""));
-  if (!raw || Number.isNaN(d.getTime())) throw new StoreSaleError("تاریخ تحویل الزامی و باید معتبر باشد");
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-const partyTitle = (p: any) => (p ? p.detailTitle || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.name || "" : "");
-
-async function baseDecimals() {
-  const c = await prisma.currency.findFirst({ where: { isBase: true } });
-  return c?.decimalPlaces ?? 0;
-}
+const parseDate = (raw: unknown): Date => parseDateOnlyUtc(raw, "تاریخ تحویل", (m) => new StoreSaleError(m));
 
 function receiptRow(r: any) {
   const method = methodOf(r);
@@ -104,7 +96,7 @@ export async function buildDeliveryPreview(stationId: number, dateRaw: unknown, 
   await assertDateWithinCurrentFiscalPeriod(date);
   const last = await prisma.storeSaleDelivery.findFirst({ where: { stationId: station.id }, orderBy: { date: "desc" }, select: { date: true } });
   if (last && date.getTime() <= last.date.getTime()) throw new StoreSaleError(`تاریخ تحویل باید بعد از تاریخ آخرین تحویل این ایستگاه (${dayStr(last.date)}) باشد`);
-  const dp = await baseDecimals();
+  const dp = await getBaseCurrencyDecimals();
   const round = (v: number) => Math.round(v * 10 ** dp) / 10 ** dp;
 
   const [sales, receipts] = await Promise.all([

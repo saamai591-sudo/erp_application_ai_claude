@@ -13,24 +13,12 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
+import { PAYMENT_NATURE_FA } from "../lib/enumLabels";
 
 // «نوع پرداخت» — هم‌الگوی «نوع دریافت» (Documents/ReceiptType.md). نوع پرداخت (nature) تعیین می‌کند این پرداخت اساساً چه
 // ماهیتی دارد، و نوع مبنا (basisType) تعیین می‌کند بر چه سندی مبتنی است؛ مقادیر مجاز نوع مبنا به نوع
 // پرداخت بستگی دارد (ALLOWED_BASIS_TYPES — باید دقیقاً هم‌راستا با بک‌اند routes/paymentTypes.ts بماند).
 // معین حسابداری روی نوع نیست؛ در «تعیین حسابهای معین» (خزانه‌داری) تعریف می‌شود.
-
-const NATURE_FA: Record<string, string> = {
-  SUPPLIER_PAYMENT: "پرداخت به تأمین‌کننده",
-  ADVANCE_PAYMENT: "پیش‌پرداخت",
-  ADVANCE_VAT_PAYMENT: "پیش‌پرداخت ارزش افزوده",
-  CUSTOMER_PAYMENT: "پرداخت به مشتری",
-  OTHER_PAYMENT: "پرداخت به سایر",
-  PURCHASE_VAT: "ارزش افزوده خرید",
-  SALES_VAT: "ارزش افزوده فروش",
-  TO_BANK: "به بانک",
-  TO_CASH_BOX: "به صندوق",
-  TO_PETTY_CASH: "به تنخواه",
-};
 
 const BASIS_TYPE_FA: Record<string, string> = {
   NONE: "بدون مبنا",
@@ -108,7 +96,7 @@ function PaymentTypeList() {
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code).padStart(3, "0")), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
-          { header: "ماهیت پرداخت", render: (r) => NATURE_FA[r.nature] || r.nature, filterType: "string", filterValue: (r) => NATURE_FA[r.nature] || r.nature },
+          { header: "ماهیت پرداخت", render: (r) => PAYMENT_NATURE_FA[r.nature] || r.nature, filterType: "string", filterValue: (r) => PAYMENT_NATURE_FA[r.nature] || r.nature },
           { header: "نوع مبنا", render: (r) => BASIS_TYPE_FA[r.basisType] || r.basisType, filterType: "string", filterValue: (r) => BASIS_TYPE_FA[r.basisType] || r.basisType },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
@@ -235,7 +223,7 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
             </label>
             <select value={form.nature} disabled={hasTransactions} onChange={(e) => onNatureChange(e.target.value)}>
               <option value="">انتخاب کنید</option>
-              {Object.entries(NATURE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(PAYMENT_NATURE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
           <div className="form-field">

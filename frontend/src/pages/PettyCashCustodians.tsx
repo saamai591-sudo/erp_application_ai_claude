@@ -14,7 +14,8 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
-import { partyDisplayName } from "./Users";
+import { partyDisplayName } from "../lib/partyDisplay";
+
 
 // «تنخواه‌دار» (مدیریت خزانه › تنظیمات). کد تفصیلی را سرور با سرویس عمومی «ایجاد کد تفصیلی» صادر می‌کند؛ کاربر آن را وارد نمی‌کند.
 

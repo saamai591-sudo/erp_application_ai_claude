@@ -93,7 +93,6 @@ function ChequeList() {
   const cacheKey = "/cheques";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     try {

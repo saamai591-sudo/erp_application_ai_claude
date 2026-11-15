@@ -13,6 +13,9 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, setLineAmount, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { assertProductionPeriodOpen, assertStatBasisRequired } from "../services/productionDocService";
+import { statLineUsage } from "../services/productionStatService";
+import { getBaseCurrencyDecimalsStrict } from "../services/baseCurrencyService";
 
 const FORM = findFormPrefix("production-receipts");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -43,6 +46,8 @@ const REVERT_PERMISSION = `${FORM}.accountingConfirmRevert`;
 const router = Router();
 
 interface LineInput {
+  /** فقط با مبنای «آمار تولید»: ردیف آمار تولیدی که این ردیف رسید از آن می‌آید */
+  sourceProductionStatLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
   quantity: number;
@@ -54,6 +59,8 @@ interface LineInput {
 }
 
 interface HeaderBody {
+  /** NO_BASIS | PRODUCTION_STAT (بر مبنای آمار تولید) */
+  basis?: "NO_BASIS" | "PRODUCTION_STAT";
   warehouseId: number;
   date: string;
   costCenterId?: number | null;
@@ -69,12 +76,6 @@ interface HeaderBody {
 function computeAmount(quantity: number, unitCost: number, decimalPlaces: number): number {
   const factor = Math.pow(10, decimalPlaces);
   return Math.round(quantity * unitCost * factor) / factor;
-}
-
-async function getBaseCurrencyDecimalPlaces(): Promise<number> {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است؛ ابتدا یک ارز را به‌عنوان ارز پایه مشخص کنید");
-  return baseCurrency.decimalPlaces;
 }
 
 async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
@@ -138,6 +139,50 @@ async function validateLines(lines: LineInput[], existingSerialIds?: Set<number>
   return cleaned;
 }
 
+/**
+ * رسید بر مبنای آمار: اگر ردیف آمار بچ دارد (کالای دارای ردیابی بچ)، همان بچ با مقدار ردیف رسید روی ردیف می‌نشیند
+ * و ورودی کاربر برای بچ نادیده گرفته می‌شود (بچ از تولید می‌آید، نه انتخاب انبار). ردیف آمارِ بدون بچ (قدیمی) دست‌نخورده می‌ماند.
+ */
+async function applyStatBatches(body: HeaderBody) {
+  if (body.basis !== "PRODUCTION_STAT" || !Array.isArray(body.lines)) return;
+  const ids = body.lines.map((l) => Number(l.sourceProductionStatLineId)).filter((x) => x > 0);
+  if (!ids.length) return;
+  const stat = await prisma.productionStatLine.findMany({ where: { id: { in: ids } }, select: { id: true, goodsItemId: true, batchId: true } });
+  const byId = new Map(stat.map((s) => [s.id, s]));
+  for (const l of body.lines) {
+    const s = byId.get(Number(l.sourceProductionStatLineId));
+    if (s?.batchId && s.goodsItemId === Number(l.goodsItemId)) l.batchAllocations = [{ batchId: s.batchId, quantity: Number(l.quantity) }];
+  }
+}
+
+/** مبنای رسید: «آمار تولید» ⇒ هر ردیف به یک ردیف آمار همان مرکز هزینه وصل است و مقدارش بیش از مانده‌ی آمار نیست؛ بدون مبنا ⇒ هیچ ردیفی آمار ندارد */
+async function validateBasis(body: HeaderBody, cleaned: { goodsItemId: number; unitId: number; quantity: number }[], date: Date, excludeDocId?: number): Promise<(number | null)[]> {
+  const basis = body.basis === "PRODUCTION_STAT" ? "PRODUCTION_STAT" : "NO_BASIS";
+  const src = (body.lines ?? []).map((l) => (l.sourceProductionStatLineId ? Number(l.sourceProductionStatLineId) : null));
+  if (basis === "NO_BASIS") {
+    if (src.some((x) => x)) throw new Error("ردیف آمار تولید فقط برای رسید «بر مبنای آمار تولید» مجاز است");
+    return src;
+  }
+  if (src.some((x) => !x)) throw new Error("در رسید «بر مبنای آمار تولید» برای همه‌ی ردیف‌ها باید ردیف آمار انتخاب شود");
+  const statLines = await prisma.productionStatLine.findMany({ where: { id: { in: src as number[] } }, include: { stat: { select: { number: true, date: true, costCenterId: true } }, goodsItem: { select: { title: true, mainUnitId: true } } } });
+  const byId = new Map(statLines.map((s) => [s.id, s]));
+  const usage = await statLineUsage(src as number[], { receiptDocId: excludeDocId });
+  const taken = new Map<number, number>();
+  for (const [i, l] of cleaned.entries()) {
+    const sl = byId.get(src[i] as number);
+    if (!sl) throw new Error(`ردیف ${i + 1}: ردیف آمار تولید یافت نشد`);
+    if (sl.stat.costCenterId !== Number(body.costCenterId)) throw new Error(`ردیف ${i + 1}: آمار شماره ${sl.stat.number} مربوط به مرکز هزینه‌ی این سند نیست`);
+    if (sl.goodsItemId !== l.goodsItemId) throw new Error(`ردیف ${i + 1}: کالای ردیف با کالای آمار شماره ${sl.stat.number} یکی نیست`);
+    if (date < sl.stat.date) throw new Error(`ردیف ${i + 1}: تاریخ رسید قبل از تاریخ آمار شماره ${sl.stat.number} است`);
+    if (l.unitId !== sl.goodsItem.mainUnitId) throw new Error(`ردیف ${i + 1}: رسید بر مبنای آمار تولید باید به واحد اصلی کالا باشد`);
+    const used = (taken.get(sl.id) ?? 0) + l.quantity;
+    taken.set(sl.id, used);
+    const remaining = usage.get(sl.id)?.remaining ?? 0;
+    if (used > remaining + 1e-9) throw new Error(`ردیف ${i + 1}: مقدار رسید («${sl.goodsItem.title}») بیش از مانده‌ی آمار شماره ${sl.stat.number} (${remaining}) است`);
+  }
+  return src;
+}
+
 router.get("/production-receipts", can(`${FORM}.view`), async (req: AuthedRequest, res) => {
   const canViewAccounting = await userHasAction(req.user!.id, VIEW_ACCOUNTING_PERMISSION);
   const items = await prisma.inventoryDocument.findMany({
@@ -184,7 +229,7 @@ router.get("/production-receipts/:id", can(`${FORM}.view`), async (req: AuthedRe
       warehouse: true,
       fiscalPeriod: true,
       lines: {
-        include: { goodsItem: true, unit: true, batches: { include: { batch: true } }, physicalLocation: true, serials: { include: { serial: true } } },
+        include: { goodsItem: true, unit: true, batches: { include: { batch: true } }, physicalLocation: true, serials: { include: { serial: true } }, sourceProductionStatLine: { include: { stat: { select: { number: true, date: true } } } } },
         orderBy: { rowOrder: "asc" },
       },
     },
@@ -211,8 +256,11 @@ router.get("/production-receipts/:id", can(`${FORM}.view`), async (req: AuthedRe
     status: d.status,
     finalizedAt: d.finalizedAt,
     updatedAt: d.updatedAt,
+    basis: d.basis === "PRODUCTION_STAT" ? "PRODUCTION_STAT" : "NO_BASIS",
     lines: d.lines.map((l: any) => ({
       id: l.id,
+      sourceProductionStatLineId: l.sourceProductionStatLineId ?? null,
+      statNumber: l.sourceProductionStatLine?.stat?.number ?? null,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,
@@ -237,8 +285,10 @@ export async function createProductionReceipt(body: HeaderBody) {
 
   const cc = await prisma.costCenter.findUnique({ where: { id: body.costCenterId } });
   if (!cc) throw new Error("مرکز هزینه یافت نشد");
+  await applyStatBatches(body);
   const cleanedLines = await validateLines(body.lines);
   const date = new Date(body.date);
+  const statSources = await validateBasis(body, cleanedLines, date);
   const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
   const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
   const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -276,7 +326,7 @@ export async function createProductionReceipt(body: HeaderBody) {
     throw new Error("برای این سند یا همه‌ی ردیف‌ها باید مبلغ داشته باشند، یا هیچ‌کدام");
   }
   const autoFinalize = pricedLines.length === cleanedLines.length && cleanedLines.length > 0;
-  const decimalPlaces = autoFinalize ? await getBaseCurrencyDecimalPlaces() : 0;
+  const decimalPlaces = autoFinalize ? await getBaseCurrencyDecimalsStrict() : 0;
 
   return prisma.$transaction(async (tx) => {
     const doc = await tx.inventoryDocument.create({
@@ -287,6 +337,7 @@ export async function createProductionReceipt(body: HeaderBody) {
         number,
         date,
         detailCode: cc.detailCode,
+        basis: body.basis === "PRODUCTION_STAT" ? "PRODUCTION_STAT" : null,
         description: body.description || null,
         status: autoFinalize ? "FINALIZED" : "REGISTERED",
         finalizedAt: autoFinalize ? new Date() : null,
@@ -297,6 +348,7 @@ export async function createProductionReceipt(body: HeaderBody) {
             quantity: l.quantity,
             description: l.description,
             rowOrder: idx,
+            sourceProductionStatLineId: statSources[idx],
             ...trackingCreateData(refs[idx], serialSteps),
           })),
         },
@@ -325,6 +377,7 @@ export async function createProductionReceipt(body: HeaderBody) {
 router.post("/production-receipts", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
   try {
+    await assertStatBasisRequired(req.body?.basis);
     const created = await createProductionReceipt(body);
     res.status(201).json(created);
   } catch (e: any) {
@@ -342,6 +395,11 @@ router.put("/production-receipts/:id", can(`${FORM}.edit`), async (req: AuthedRe
     include: { lines: { include: { serials: true } }, warehouse: true },
   });
   if (!existing) return res.status(404).json({ error: "سند رسید تولید یافت نشد" });
+  try {
+    await assertProductionPeriodOpen(existing.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   const existingSerialIds = new Set(existing.lines.flatMap((l: any) => l.serials.map((s: any) => s.serialId)));
 
   // بعد از «تایید حسابداری» (status=FINALIZED)، این PUT دیگر امکان تغییر سرصفحه/مقدار/کالای ردیف‌ها را
@@ -376,7 +434,7 @@ router.put("/production-receipts/:id", can(`${FORM}.edit`), async (req: AuthedRe
           throw new Error(`این سند تایید حسابداری شده است؛ کالا/واحد/مقدار ردیف ${idx + 1} قابل تغییر نیست`);
         }
       }
-      const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+      const decimalPlaces = await getBaseCurrencyDecimalsStrict();
       await prisma.$transaction(async (tx) => {
         for (const [idx, l] of sortedExisting.entries()) {
           const unitCost = Number((body.lines[idx] as any).unitCost) || 0;
@@ -408,8 +466,12 @@ router.put("/production-receipts/:id", can(`${FORM}.edit`), async (req: AuthedRe
     const oldDoc = { id: existing.id, documentType: existing.documentType, warehouseId: existing.warehouseId!, date: existing.date };
     await assertSafeToReverseEffects(prisma, oldDoc, oldEffectLines, existing.warehouse!.stockControl);
 
+    await applyStatBatches(body);
     const cleanedLines = await validateLines(body.lines, existingSerialIds);
     const date = new Date(body.date);
+    await assertProductionPeriodOpen(date);
+    await assertStatBasisRequired(body.basis);
+    const statSources = await validateBasis(body, cleanedLines, date, id);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
     const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -428,6 +490,7 @@ router.put("/production-receipts/:id", can(`${FORM}.edit`), async (req: AuthedRe
           fiscalPeriodId: fiscalPeriod.id,
           date,
           detailCode: cc.detailCode,
+          basis: body.basis === "PRODUCTION_STAT" ? "PRODUCTION_STAT" : null,
           description: body.description || null,
           lines: {
             create: cleanedLines.map((l, idx) => ({
@@ -436,6 +499,7 @@ router.put("/production-receipts/:id", can(`${FORM}.edit`), async (req: AuthedRe
               quantity: l.quantity,
               description: l.description,
               rowOrder: idx,
+              sourceProductionStatLineId: statSources[idx],
               ...trackingCreateData(refs[idx], serialSteps),
             })),
           },
@@ -459,6 +523,11 @@ router.delete("/production-receipts/:id", can(`${FORM}.delete`), async (req, res
   const id = Number(req.params.id);
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PRODUCTION_RECEIPT" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  try {
+    await assertProductionPeriodOpen(d.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (d.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل حذف نیست" });
 
   try {
@@ -506,6 +575,11 @@ router.post(
     const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PRODUCTION_RECEIPT" } });
     if (!d) return res.status(404).json({ error: "سند رسید تولید یافت نشد" });
     if (d.status !== "FINALIZED") return res.status(400).json({ error: "این سند تایید حسابداری نشده است" });
+    try {
+      await assertProductionPeriodOpen(d.date);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
     const updated = await prisma.inventoryDocument.update({
       where: { id },
       data: { status: "REGISTERED", finalizedAt: null },

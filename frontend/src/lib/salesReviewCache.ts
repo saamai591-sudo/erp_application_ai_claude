@@ -32,7 +32,7 @@ export function setSalesReviewSnapshot(snapshot: SalesReviewSnapshot) {
   store.set(snapshot);
 }
 
-export function clearSalesReviewSnapshot() {
+function clearSalesReviewSnapshot() {
   store.clearAll();
 }
 

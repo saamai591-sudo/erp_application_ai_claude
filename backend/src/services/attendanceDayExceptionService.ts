@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { AttendanceError, assertDateOpenForAll, dayStr, minuteText, parseDay } from "./attendancePunchService";
 import type { TimelineRow } from "./attendanceShiftService";
-import { DAY_TYPE_FA, type AttDayType } from "./attendanceFormulaDefs";
+import { type AttDayType } from "./attendanceFormulaDefs";
 
 // مدیریت تردد › عملیات › «استثنای روز» (مثلاً چهارشنبه‌سوری: پایان شیفت ساعت ۱۵ / بارندگی: شروع ساعت ۱۰ / اعلام تعطیلی): برای فقط «یک تاریخ» و دامنه‌ی «همه‌ی شیفت‌ها»
 // یا «شیفت‌های انتخابی»، یکی از پنج اثر: تغییر شروع / تغییر پایان / تغییر شروع و پایان (ساعتِ شروعِ اولین و پایانِ آخرین بازه‌ی کاری) یا اعلام تعطیلی شیفت / تعطیلی رسمی. شیفت دست نمی‌خورد؛
@@ -11,7 +11,6 @@ import { DAY_TYPE_FA, type AttDayType } from "./attendanceFormulaDefs";
 
 const DAY = 1440;
 const DAY_MS = 86400000;
-const MAX_RANGE_DAYS = 366;
 const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
 
 export interface DayExc {
@@ -91,9 +90,9 @@ export function applyToDay(dayRows: TimelineRow[], ex: DayExc): Applied {
 
 // ───────────────────────── CRUD ─────────────────────────
 
-export const EFFECT_FA: Record<string, string> = { START: "تغییر ساعت شروع", END: "تغییر ساعت پایان", START_END: "تغییر ساعت شروع/پایان", SHIFT_OFF: "اعلام تعطیلی شیفت", OFFICIAL_HOLIDAY: "اعلام تعطیلی رسمی" };
+const EFFECT_FA: Record<string, string> = { START: "تغییر ساعت شروع", END: "تغییر ساعت پایان", START_END: "تغییر ساعت شروع/پایان", SHIFT_OFF: "اعلام تعطیلی شیفت", OFFICIAL_HOLIDAY: "اعلام تعطیلی رسمی" };
 
-export function effectText(e: { effect: string; newStartMinute: number | null; newEndMinute: number | null }): string {
+function effectText(e: { effect: string; newStartMinute: number | null; newEndMinute: number | null }): string {
   if (e.effect === "SHIFT_OFF" || e.effect === "OFFICIAL_HOLIDAY") return EFFECT_FA[e.effect];
   const parts: string[] = [];
   if (e.newStartMinute !== null) parts.push(`شروع ${minuteText(e.newStartMinute)}`);

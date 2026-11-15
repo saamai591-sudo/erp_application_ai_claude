@@ -11,6 +11,7 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { assertProductionLink, assertProductionPeriodOpen } from "../services/productionDocService";
 
 const FORM = findFormPrefix("production-consumption-returns");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -33,6 +34,7 @@ interface LineInput {
 }
 
 interface HeaderBody {
+  productionOrderId?: number | null;
   warehouseId: number;
   date: string;
   description?: string;
@@ -204,6 +206,7 @@ router.get("/production-consumption-returns/:id", can(`${FORM}.view`), async (re
     status: d.status,
     finalizedAt: d.finalizedAt,
     updatedAt: d.updatedAt,
+    productionOrderId: d.productionOrderId ?? null,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       sourceProductionConsumptionLineId: l.sourceProductionConsumptionLineId,
@@ -230,6 +233,8 @@ router.post("/production-consumption-returns", can(`${FORM}.create`), async (req
   try {
     const cleanedLines = await validateLines(body.warehouseId, body.lines);
     const date = new Date(body.date);
+    await assertProductionPeriodOpen(date);
+    await assertProductionLink(body.productionOrderId, date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
     const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -253,6 +258,7 @@ router.post("/production-consumption-returns", can(`${FORM}.create`), async (req
           fiscalPeriodId: fiscalPeriod.id,
           number,
           date,
+          productionOrderId: body.productionOrderId || null,
           description: body.description || null,
           status: "REGISTERED",
           lines: {
@@ -290,6 +296,11 @@ router.put("/production-consumption-returns/:id", can(`${FORM}.edit`), async (re
     include: { lines: { include: { serials: true } }, warehouse: true },
   });
   if (!existing) return res.status(404).json({ error: "سند برگشت مصرف تولید یافت نشد" });
+  try {
+    await assertProductionPeriodOpen(existing.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (existing.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل ویرایش نیست" });
   const existingSerialIds = new Set(existing.lines.flatMap((l: any) => l.serials.map((s: any) => s.serialId)));
 
@@ -308,6 +319,8 @@ router.put("/production-consumption-returns/:id", can(`${FORM}.edit`), async (re
 
     const cleanedLines = await validateLines(body.warehouseId, body.lines, id, existingSerialIds);
     const date = new Date(body.date);
+    await assertProductionPeriodOpen(date);
+    await assertProductionLink(body.productionOrderId, date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
     const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -324,6 +337,7 @@ router.put("/production-consumption-returns/:id", can(`${FORM}.edit`), async (re
           warehouseId: warehouse.id,
           fiscalPeriodId: fiscalPeriod.id,
           date,
+          productionOrderId: body.productionOrderId || null,
           description: body.description || null,
           lines: {
             create: cleanedLines.map((l, idx) => ({
@@ -356,6 +370,11 @@ router.delete("/production-consumption-returns/:id", can(`${FORM}.delete`), asyn
   const id = Number(req.params.id);
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PRODUCTION_CONSUMPTION_RETURN" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  try {
+    await assertProductionPeriodOpen(d.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (d.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل حذف نیست" });
 
   try {

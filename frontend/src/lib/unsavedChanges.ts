@@ -11,7 +11,7 @@
 // دکمه‌ی «جدید» داخل فرم (resetActiveTabToNew)، بستن همه‌ی تب‌ها (تغییر دوره مالی)، و بستن/رفرش خودِ مرورگر
 // (beforeunload). همه از confirmDiscard() و همین پیام استفاده می‌کنند.
 
-export const UNSAVED_CHANGES_MESSAGE =
+const UNSAVED_CHANGES_MESSAGE =
   "این فرم تغییرات ذخیره‌نشده دارد.\nاگر آن را ببندید، اطلاعاتی که وارد یا ویرایش کرده‌اید از بین می‌رود.\n\nآیا می‌خواهید بدون ذخیره ببندید؟";
 
 // کلیدهای کامل stateهای «کثیف»‌شده‌ی فرم‌ها (مثلاً form:/payments/new:header)

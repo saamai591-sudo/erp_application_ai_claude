@@ -2,8 +2,7 @@ import { RECEIPT_DOC_INCLUDE, receiptLineDoc } from "../services/settlementDocRe
 import { EffectiveSettings } from "../services/goodsAccountingSettingService";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate, getAdvanceReceiptMethodForDate } from "../services/accountingSettingsService";
@@ -20,6 +19,8 @@ import { assertNotSentToTax } from "../services/taxInvoiceSendService";
 import { dateWhere, numberWhere, parseFilters, parseSorts, stringWhere } from "../utils/tableFilters";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
 import { findIssuingDocType } from "../services/documentTypeService";
+import { resolveFxRate, getBaseCurrency } from "../services/baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 const FORM = findFormPrefix("sales-invoices");
 
@@ -67,27 +68,9 @@ const FORM = findFormPrefix("sales-invoices");
 
 const router = Router();
 
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
-
-function partyDisplayName(party: any) {
-  return party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim();
-}
-
 /** نرخ تبدیل ارز فاکتور را از بدنه‌ی درخواست resolve می‌کند — دقیقاً هم‌الگوی
  * purchaseInvoices.ts#resolveInvoiceFxRate: اگر ارز فاکتور همان ارز مبنا باشد همیشه ۱ برمی‌گردد، وگرنه
  * نرخ باید توسط کاربر وارد شده باشد (اجباری، بزرگ‌تر از صفر)، نه از جدول نرخ ارز. */
-function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFxRate: number | undefined): number {
-  if (currencyId === baseCurrencyId) return 1;
-  const fxRate = Number(bodyFxRate);
-  if (!(fxRate > 0)) throw new Error("نرخ ارز الزامی است");
-  return fxRate;
-}
 
 /**
  * ردیف‌های فاکتورِ حسابی: فاکتور ابطال‌شده (VOIDED) در هیچ محاسبه‌ی «مانده‌ی فاکتورنشده»ی حواله/سفارش/پیش‌فاکتور (مقدار، مبلغ، تخفیف) نمی‌آید — حواله‌ی ۱۰۰ با
@@ -882,7 +865,7 @@ router.get("/sales-invoices", can(`${FORM}.view`), async (req, res) => {
     number: d.number,
     date: d.date,
     customerId: d.customerId,
-    customerTitle: partyDisplayName(d.customer.party),
+    customerTitle: partyTitle(d.customer.party),
     salesTypeId: d.salesTypeId,
     salesTypeTitle: d.salesType.title,
     salesCenterId: d.salesCenterId,
@@ -964,7 +947,7 @@ router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
     number: d.number,
     date: d.date,
     customerId: d.customerId,
-    customerTitle: partyDisplayName(d.customer.party),
+    customerTitle: partyTitle(d.customer.party),
     salesTypeId: d.salesTypeId,
     salesTypeTitle: d.salesType.title,
     salesCenterId: d.salesCenterId,
@@ -988,7 +971,7 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
   }
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
     const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
@@ -997,9 +980,8 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
+    const baseCurrency = await getBaseCurrency();
+    const fxRate = resolveFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
     const headerCtx = await buildHeaderCtx({ customerId: body.customerId, salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, currencyId: body.currencyId, date });
     const lines = await validateLines(body.lines, headerCtx, currency, fxRate, baseCurrency);
@@ -1051,7 +1033,7 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این فاکتور فروش");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
     const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
@@ -1060,9 +1042,8 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
+    const baseCurrency = await getBaseCurrency();
+    const fxRate = resolveFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
     // ردیف‌های کالاییِ «بدون مبنا/سفارش/پیش‌فاکتور» که از طراحی قبلی در همین فاکتور مانده‌اند می‌توانند بمانند؛ ردیف تازه‌ی کالایی با این مبناها مجاز نیست (کالا فقط از حواله فروش)
     const legacyRows = await prisma.salesInvoiceLine.findMany({ where: { salesInvoiceId: id, basis: { in: ["NO_BASIS", "SALES_ORDER", "SALES_QUOTE"] }, goodsItem: { kind: "GOODS" } }, select: { goodsItemId: true } });
@@ -1198,8 +1179,7 @@ export async function issueSalesInvoiceJournalHandler(req: any, res: any) {
   if (invoice.status === "VOIDED") return res.status(400).json({ error: "این فاکتور فروش باطل شده است؛ امکان صدور سند حسابداری وجود ندارد" });
 
   try {
-    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const baseCurrency = await getBaseCurrency();
     const fxRate = Number(invoice.fxRate);
 
     const partyDetailCode = invoice.customer.party.detailCode;
@@ -1223,7 +1203,7 @@ export async function issueSalesInvoiceJournalHandler(req: any, res: any) {
       return effSettings.find(settingDocDate, (s: any) => s.accountType === "SALES_RECEIVABLE" && match(s)) as (typeof settings)[number] | undefined;
     }
 
-    const customerName = partyDisplayName(invoice.customer.party) || "";
+    const customerName = partyTitle(invoice.customer.party) || "";
     const description = `بابت فاکتور فروش ${invoice.number} ${formatJalaliDateForMessage(invoice.date)} ${customerName}`.trim();
     const vatDescription = `بابت ارزش‌افزوده فاکتور فروش ${invoice.number} ${formatJalaliDateForMessage(invoice.date)} ${customerName}`.trim();
 

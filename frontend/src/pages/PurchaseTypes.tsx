@@ -16,7 +16,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 export type PurchaseNature = "IMPORTED" | "DOMESTIC";
 
-export const PURCHASE_NATURE_FA: Record<PurchaseNature, string> = {
+const PURCHASE_NATURE_FA: Record<PurchaseNature, string> = {
   IMPORTED: "وارداتی",
   DOMESTIC: "داخلی",
 };
@@ -43,7 +43,6 @@ function PurchaseTypeList() {
   const cacheKey = "/purchase-types";
   const [items, setItems] = usePersistedState<PurchaseType[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/purchase-types").then(setItems).catch((e) => setError(e.message));

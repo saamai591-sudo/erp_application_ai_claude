@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { partyTitle } from "../utils/partyTitle";
 
 // حقوق و دستمزد › وام: منطق «مانده‌محور» اقساط (تنها محل محاسبه‌ی مانده و قسط هر ماه — هم محاسبه‌ی حقوق و هم انتخابگرها از اینجا می‌خوانند).
 //  • مانده‌ی وام در پایان هر ماهِ محاسبه‌شده (همزمان با «حقوق ماهانه») در LoanMonthlyBalance نگه داشته می‌شود؛ مانده‌ی اولِ یک ماه = مانده‌ی بعد از آخرین ماه
@@ -73,7 +74,7 @@ export function installmentAt(c: LoanCtx, ym: number): number {
   return v;
 }
 
-export const isSuspendedAt = (c: LoanCtx, ym: number) => c.susp.some((s) => s.fromYm <= ym && ym <= s.toYm);
+const isSuspendedAt = (c: LoanCtx, ym: number) => c.susp.some((s) => s.fromYm <= ym && ym <= s.toYm);
 
 export interface LoanMonthItem {
   loanId: number;
@@ -85,7 +86,7 @@ export interface LoanMonthItem {
 }
 
 /** قسط و مانده‌ی یک وام در یک ماه؛ null = وام در این ماه کاری ندارد (هنوز شروع نشده یا تسویه شده) */
-export function computeLoanItem(c: LoanCtx, ym: number): LoanMonthItem | null {
+function computeLoanItem(c: LoanCtx, ym: number): LoanMonthItem | null {
   if (ym < c.startYm) return null;
   const before = balanceBefore(c, ym);
   if (before <= 0) return null;
@@ -167,8 +168,6 @@ export async function nextNumber(model: "loan" | "loanAdjustment" | "loanSuspens
   return (last?.number ?? 0) + 1;
 }
 
-const partyName = (p: { firstName: string | null; lastName: string | null; name: string | null }) => [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "";
-
 export interface PickableLoan {
   id: number;
   number: number;
@@ -202,7 +201,7 @@ export async function pickableLoans(year: number, month: number, opts: { adjustm
       paymentDate: l.paymentDate.toISOString().slice(0, 10),
       loanTypeTitle: l.loanType.title,
       personnelCode: l.employee.personnelCode,
-      employeeName: partyName(l.employee.party),
+      employeeName: partyTitle(l.employee.party),
       installment: installmentAt(c, ym),
       balance,
     });

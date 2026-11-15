@@ -11,9 +11,9 @@ import { hydrateSharedHtml, PRINT_CSP_META, renderSavedTemplate } from "./printS
 // مسیر عمومی نمایش در routes/printShare.ts است (بدون requireAuth)؛ ساخت/فهرست/لغو در routes/printTemplates.ts و با مجوز «مشاهده»ی همان سند.
 
 export const SHARE_DEFAULT_DAYS = 7;
-export const SHARE_MAX_DAYS = 60;
+const SHARE_MAX_DAYS = 60;
 /** حداکثر لینک فعال برای هر سند */
-export const SHARE_MAX_ACTIVE_PER_DOC = 5;
+const SHARE_MAX_ACTIVE_PER_DOC = 5;
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 

@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // منبع داده‌ی گزارش‌های «مرور اسناد دریافتنی» و «مرور اسناد پرداختنی» (مدیریت خزانه > گزارش) —
@@ -56,13 +57,8 @@ export interface ChequeRow {
   events: ChequeEvent[];
 }
 
-function partyDisplay(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 /** از/تا باید در یک دوره‌ی مالی باشند؛ همان دوره را برمی‌گرداند */
-export async function assertSingleFiscalPeriod(fromDate: Date, toDate: Date) {
+async function assertSingleFiscalPeriod(fromDate: Date, toDate: Date) {
   if (toDate < fromDate) throw new Error("«تا تاریخ» نباید قبل از «از تاریخ» باشد");
   const [a, b] = await Promise.all([
     prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: fromDate }, toDate: { gte: fromDate } } }),
@@ -95,7 +91,7 @@ export async function getChequeReviewRows(kind: ChequeKind, fromDate: Date, toDa
     const rows: ChequeRow[] = [];
     for (const c of cheques) {
       const events: ChequeEvent[] = [];
-      const base = { chequeId: c.id, chequeNumber: c.number, partyDisplay: partyDisplay(c.party), amount: Number(c.amount) };
+      const base = { chequeId: c.id, chequeNumber: c.number, partyDisplay: partyTitle(c.party), amount: Number(c.amount) };
       const push = (key: string, date: Date, typeCode: string, typeTitle: string, docRoute: string | null, docId: number | null, docNumber: number | null, description: string | null) =>
         events.push({ ...base, key: `${c.id}:${key}`, date, typeCode, typeTitle, docRoute, docId, docNumber, description });
 

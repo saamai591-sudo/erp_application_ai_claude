@@ -17,6 +17,7 @@ import { downloadBase64, mimeOfFile } from "../lib/downloadBase64";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
+import { KIND_FA } from "../lib/payrollLabels";
 
 // حقوق و دستمزد › تنظیمات › ساختار فایل: تعریف ساختار فایل‌های بانک‌ها و سازمان‌ها (مالیات، تامین اجتماعی، …).
 // هر ساختار = چند فایل؛ هر فایل = چند فیلد با منبع مقدار (ثابت، فیلد سیستمی، مجموع عامل‌ها، مجموع/تعداد فایل دیگر، پارامتر، فرمول). ساختارهای پیش‌فرض نصب
@@ -83,8 +84,6 @@ interface Options {
   banks: { id: number; title: string }[];
   branches: { id: number; organizationId: number; fileNumber: string; contractRow: string; title: string }[];
 }
-
-const KIND_FA: Record<string, string> = { EARNING: "پرداختی", DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما", WORK: "کارکرد", INFO: "اطلاعاتی" };
 
 const SECTION_FA: Record<string, string> = { HEADER: "هدر", ITEM: "آیتم", FOOTER: "فوتر" };
 const DELIMITERS: { value: string; label: string }[] = [

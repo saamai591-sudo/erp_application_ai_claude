@@ -16,8 +16,9 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
-import { partyDisplayName } from "./Users";
+
 import { DescriptionField } from "../components/DescriptionField";
+import { partyDisplayName } from "../lib/partyDisplay";
 
 const SOURCE_TYPE_FA: Record<string, string> = { MANUAL: "دستی", PURCHASE: "خرید", PRODUCTION: "تولید" };
 
@@ -51,6 +52,7 @@ interface Batch {
   hasTransactions: boolean;
   goodsItem: GoodsItemOption;
   supplier: PartyOption | null;
+  productionOrder?: { id: number; number: number } | null;
 }
 
 export default function Batches() {
@@ -67,7 +69,6 @@ function BatchList() {
   const cacheKey = "/batches";
   const [items, setItems] = usePersistedState<Batch[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/batches").then(setItems).catch((e) => setError(e.message));
@@ -103,6 +104,7 @@ function BatchList() {
           { header: "تاریخ تولید", render: (r) => formatJalaliDate(r.productionDate), width: "110px" },
           { header: "تاریخ انقضا", render: (r) => formatJalaliDate(r.expiryDate), width: "110px" },
           { header: "منشا", render: (r) => SOURCE_TYPE_FA[r.sourceType], width: "80px" },
+          { header: "دستور تولید", render: (r) => (r.productionOrder ? toFaDigits(String(r.productionOrder.number)) : ""), width: "100px", filterType: "number", filterValue: (r) => r.productionOrder?.number ?? "" },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "70px" },
         ]}
         rows={items}

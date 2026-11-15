@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { filterChequesByBaseDate, assertChequeBaseDatesNotAfter } from "../services/chequeBaseDates";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
@@ -31,14 +30,6 @@ interface HeaderBody {
   date: string;
   description?: string;
   chequeItemIds: number[];
-}
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
 }
 
 async function validateChequeIds(chequeItemIds: number[], formDate: Date, excludeDocId?: number) {
@@ -147,7 +138,7 @@ router.post("/cheque-deposit-returns", can(`${FORM}.create`), async (req, res) =
 
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const chequeItemIds = await validateChequeIds(body.chequeItemIds, date);
 
     const lastNumber = await prisma.chequeDepositReturn.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
@@ -185,7 +176,7 @@ router.put("/cheque-deposit-returns/:id", can(`${FORM}.edit`), async (req, res) 
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const chequeItemIds = await validateChequeIds(body.chequeItemIds, date, id);
 
     await prisma.$transaction([
@@ -225,7 +216,7 @@ router.post("/cheque-deposit-returns/:id/approve", can(`${FORM}.approve`), async
   if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک چک داشته باشد" });
 
   try {
-    await resolveFiscalPeriod(d.date);
+    await resolveDocumentFiscalPeriod(d.date);
 
     for (const l of d.lines) {
       if (l.chequeItem.direction !== "RECEIVABLE" || l.chequeItem.status !== "IN_COLLECTION") {
@@ -306,7 +297,6 @@ registerChequeDocReEdit(router, {
   minOneMessage: "سند برگشت از واگذاری باید حداقل یک چک داشته باشد",
   hasOutcome: false,
   revertStatus: "IN_COLLECTION",
-  resolveFiscalPeriod,
 });
 
 export default router;

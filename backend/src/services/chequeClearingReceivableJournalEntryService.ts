@@ -4,8 +4,10 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
-import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { EffectiveTreasurySettings } from "./treasurySettingService";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // صدور سند حسابداری «وصول و برگشت چک دریافتنی» (ChequeClearingReceivable) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به
@@ -22,10 +24,6 @@ import { findIssuingDocType } from "./documentTypeService";
 // چک همیشه با ارز پایه است، پس همه‌ی ردیف‌ها به ارز پایه ثبت می‌شوند. کارمزد بانکی این سند لحاظ نمی‌شود.
 // =========================================================================
 
-function partyDisplayName(p: any): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 export async function issueChequeClearingReceivableJournalEntry(clearingId: number) {
   const doc = await prisma.chequeClearingReceivable.findUnique({
     where: { id: clearingId },
@@ -36,8 +34,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
   if (doc.status !== "APPROVED") throw new Error("فقط برای سندِ «تایید»شده می‌توان سند حسابداری صادر کرد");
   if (doc.lines.length === 0) throw new Error("سند چکی ندارد");
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   const treasurySettings = new EffectiveTreasurySettings(await prisma.treasuryAccountSetting.findMany({ include: { account: true } }) as any[]);
   const description = `بابت وصول و برگشت چک دریافتنی ${doc.number} ${formatJalaliDateForMessage(doc.date)}`.trim();
@@ -90,7 +87,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
         debit: amount,
         credit: 0,
         fxRate: 1,
-        description: `${description} — برگشت چک ${cheque.number} ${partyDisplayName(cheque.party)}`.trim(),
+        description: `${description} — برگشت چک ${cheque.number} ${partyTitle(cheque.party)}`.trim(),
       });
     }
   }

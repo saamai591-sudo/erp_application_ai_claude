@@ -1,21 +1,22 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertChequeBaseDatesNotAfter } from "../services/chequeBaseDates";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 import { assertUsedInstrumentsUnchanged } from "../utils/instrumentLock";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsage";
-import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { registerTreasuryAccountingRoutes } from "../services/treasuryDocAccountingActions";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry, accountingApprovePayment, getPaymentAccountingView, savePaymentAccountingDetails } from "../services/paymentJournalEntryService";
-import { candidatesForBasisType, pickableBasisDocuments, basisGroupOf, rowBasisTypeOf, BasisType, RowBasisType, BasisCandidate } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, pickableBasisDocuments, basisGroupOf, rowBasisTypeOf, BasisType, RowBasisType, BasisCandidate, BASIS_FIELD } from "../services/paymentBasisCandidates";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
 import { assertPaymentAdvanceNotAllocated } from "../services/purchaseInvoiceAdvanceService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { getBaseCurrency, resolveFxRate } from "../services/baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
+import { runRouteHandler } from "../utils/internalHandler";
 
 const FORM = findFormPrefix("payments");
 
@@ -50,16 +51,8 @@ const FORM = findFormPrefix("payments");
 
 const router = Router();
 
-/** اجرای داخلی یکی از handlerهای تایید/برگشت (همان منطق، بدون HTTP)؛ خطا با همان پیام handler پرتاب می‌شود */
-async function runInternal(handler: (req: any, res: any) => Promise<any>, id: number) {
-  let status = 200;
-  let body: any;
-  const res: any = { status(c: number) { status = c; return res; }, json(b: any) { body = b; return res; }, send() { return res; } };
-  await handler({ params: { id: String(id) }, body: {} }, res);
-  if (status >= 400) throw new Error(body?.error || "خطا");
-}
-const approveCore = (id: number) => runInternal(paymentApproveHandler, id);
-const unapproveCore = (id: number) => runInternal(paymentUnapproveHandler, id);
+const approveCore = (id: number) => runRouteHandler(paymentApproveHandler, id);
+const unapproveCore = (id: number) => runRouteHandler(paymentUnapproveHandler, id);
 const ACCOUNTING_LOCK_MESSAGE = "این سند «تایید حسابداری» شده است؛ ابتدا «لغو تایید حسابداری» را بزنید";
 
 interface InstrumentLineInput {
@@ -105,35 +98,6 @@ interface HeaderBody {
   description?: string;
   instrumentLines: InstrumentLineInput[];
   settlementLines: SettlementLineInput[];
-}
-
-const BASIS_FIELD: Record<Exclude<RowBasisType, "NONE">, "purchaseInvoiceId" | "servicePurchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
-  PURCHASE_INVOICE: "purchaseInvoiceId",
-  SERVICE_PURCHASE_INVOICE: "servicePurchaseInvoiceId",
-  SALES_INVOICE: "salesInvoiceId",
-  PURCHASE_ORDER: "purchaseOrderId",
-};
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
-
-async function getBaseCurrency() {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-  return baseCurrency;
-}
-
-/** طبق Documents/تبدیل ارز.md — اگر ارز ردیف همان ارز پایه باشد نرخ همیشه ۱ است، در غیر این‌صورت کاربر باید نرخ را وارد کند */
-function resolveFxRate(currencyId: number, baseCurrencyId: number, bodyFxRate: number | null | undefined): number {
-  if (currencyId === baseCurrencyId) return 1;
-  const fxRate = Number(bodyFxRate);
-  if (!(fxRate > 0)) throw new Error("نرخ ارز الزامی است");
-  return fxRate;
 }
 
 // =========================================================================
@@ -496,10 +460,6 @@ async function markPaymentTypesUsed(lines: { paymentTypeId: number }[]) {
   if (ids.length) await prisma.paymentType.updateMany({ where: { id: { in: ids } }, data: { hasTransactions: true } });
 }
 
-function partyDisplay(p: any) {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 const JE_LOCK_MESSAGE = "برای این سند پرداخت، سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید";
 
 // =========================================================================
@@ -517,7 +477,7 @@ router.get("/payments", can(`${FORM}.view`), async (_req, res) => {
       number: d.number,
       date: d.date,
       partyId: d.partyId,
-      partyDisplay: partyDisplay(d.party),
+      partyDisplay: partyTitle(d.party),
       fiscalPeriodTitle: d.fiscalPeriod.title,
       description: d.description,
       status: d.status,
@@ -558,7 +518,7 @@ function serializePayment(d: any) {
     number: d.number,
     date: d.date,
     partyId: d.partyId,
-    partyDisplay: partyDisplay(d.party),
+    partyDisplay: partyTitle(d.party),
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
@@ -603,20 +563,20 @@ function serializePayment(d: any) {
       paymentTypeId: l.paymentTypeId,
       paymentTypeTitle: l.paymentType.title,
       partyId: l.partyId,
-      partyDisplay: l.party ? partyDisplay(l.party) : "",
+      partyDisplay: l.party ? partyTitle(l.party) : "",
       bankAccountId: l.bankAccountId,
       cashBoxId: l.cashBoxId,
       custodianId: l.custodianId,
-      custodianDisplay: l.custodian ? `${l.custodian.detailCode} — ${l.custodian.pettyCash.title} (${partyDisplay(l.custodian.party)})` : "",
+      custodianDisplay: l.custodian ? `${l.custodian.detailCode} — ${l.custodian.pettyCash.title} (${partyTitle(l.custodian.party)})` : "",
       // عنوان «حساب» ردیف: طرف حساب، یا حساب بانکی / صندوق / تنخواه‌دار (ماهیت «به بانک» / «به صندوق» / «به تنخواه»)
       accountDisplay: l.bankAccount
         ? `${l.bankAccount.accountNumber} — ${l.bankAccount.bankBranch.title}`
         : l.cashBox
           ? l.cashBox.title
           : l.custodian
-            ? `${l.custodian.detailCode} — ${l.custodian.pettyCash.title} (${partyDisplay(l.custodian.party)})`
+            ? `${l.custodian.detailCode} — ${l.custodian.pettyCash.title} (${partyTitle(l.custodian.party)})`
             : l.party
-              ? partyDisplay(l.party)
+              ? partyTitle(l.party)
               : "",
       purchaseInvoiceId: l.purchaseInvoiceId,
       purchaseInvoiceNumber: l.purchaseInvoice?.number,
@@ -650,7 +610,7 @@ router.post("/payments", can(`${FORM}.create`), async (req, res) => {
 
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف حساب یافت نشد");
 
@@ -736,7 +696,7 @@ router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف حساب یافت نشد");
 
@@ -839,7 +799,7 @@ async function paymentApproveHandler(req: any, res: any) {
   if (d.instrumentLines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف ابزار پرداخت داشته باشد" });
 
   try {
-    await resolveFiscalPeriod(d.date);
+    await resolveDocumentFiscalPeriod(d.date);
     const approveBaseCurrency = await getBaseCurrency();
 
     // بازبینی مانده‌ی سند مبنای هر ردیف موضوعات پرداخت در لحظه‌ی تایید (ممکن است از زمان ثبت تغییر کرده باشد).
@@ -1080,7 +1040,7 @@ router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
   try {
     const { existing, editable, locked } = await loadReEditContext(id);
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
-    await resolveFiscalPeriod(existing.date);
+    await resolveDocumentFiscalPeriod(existing.date);
     const baseCurrency = await getBaseCurrency();
 
     const editableById = new Map<number, any>(editable.map((l: any) => [l.id, l]));

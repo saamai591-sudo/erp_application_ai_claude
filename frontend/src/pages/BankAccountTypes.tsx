@@ -29,7 +29,6 @@ function AccountTypeList() {
   const cacheKey = "/bank-account-types";
   const [types, setTypes] = usePersistedState<AccountType[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/banking/account-types").then(setTypes).catch((e) => setError(e.message));

@@ -1,6 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
@@ -26,6 +25,8 @@ import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { markTreasurySettingsUsed } from "./treasurySettingService";
 import { assertReceiptAdvanceNotAllocated } from "./salesInvoiceAdvanceService";
 import { assertPaymentAdvanceNotAllocated } from "./purchaseInvoiceAdvanceService";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // «اعلامیه بدهکار بستانکار» (مدیریت خزانه › دریافت) — تسویه بین طرف‌حساب‌ها بدون ابزار؛ تنها نویسنده‌ی PartySettlement.
@@ -87,19 +88,6 @@ export interface PartySettlementBody {
   updatedAt?: string;
 }
 
-function partyDisplay(p: any) {
-  if (!p) return "";
-  return p.detailTitle || (p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim());
-}
-
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
-
 /** پیام‌های validateSubjectLines دریافت/پرداخت از دید «ابزار» نوشته شده؛ اینجا به زبان همین فرم برمی‌گردند */
 function friendly(e: any, side: "RECEIPT" | "PAYMENT"): Error {
   const m = String(e?.message || "خطا");
@@ -109,12 +97,6 @@ function friendly(e: any, side: "RECEIPT" | "PAYMENT"): Error {
     return new Error("جمع ردیف‌های پرداختِ لودشده از هر ردیف دریافت باید دقیقاً برابر مبلغ ریالی همان ردیف دریافت باشد (هر ردیف دریافت باید کاملاً به ردیف‌های پرداخت تخصیص یابد)");
   }
   return e instanceof Error ? e : new Error(m);
-}
-
-async function getBaseCurrency() {
-  const base = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!base) throw new Error("ارز پایه تعریف نشده است");
-  return base;
 }
 
 /** معادل ریالی هر ردیف — دقیقاً همان محاسبه‌ی validateSubjectLines (تا برابری ریالی با کنترل‌های آن‌ها هم‌خوان بماند) */
@@ -206,7 +188,7 @@ export async function getPartySettlement(id: number) {
       receiptTypeId: l.receiptTypeId,
       receiptTypeTitle: l.receiptType.title,
       partyId: l.partyId,
-      partyDisplay: partyDisplay(l.party),
+      partyDisplay: partyTitle(l.party),
       salesInvoiceId: l.salesInvoiceId,
       salesInvoiceNumber: l.salesInvoice?.number,
       purchaseInvoiceId: l.purchaseInvoiceId,
@@ -231,7 +213,7 @@ export async function getPartySettlement(id: number) {
       paymentTypeId: l.paymentTypeId,
       paymentTypeTitle: l.paymentType.title,
       partyId: l.partyId,
-      partyDisplay: partyDisplay(l.party),
+      partyDisplay: partyTitle(l.party),
       salesInvoiceId: l.salesInvoiceId,
       salesInvoiceNumber: l.salesInvoice?.number,
       purchaseInvoiceId: l.purchaseInvoiceId,
@@ -319,7 +301,7 @@ async function validateAndClean(body: PartySettlementBody, date: Date, settlemen
 export async function savePartySettlement(body: PartySettlementBody, userId: number | null, id?: number) {
   if (!body?.date) throw new Error("تاریخ سند الزامی است");
   const date = new Date(body.date);
-  const fiscalPeriod = await resolveFiscalPeriod(date);
+  const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
 
   let existing: any = null;
   if (id) {

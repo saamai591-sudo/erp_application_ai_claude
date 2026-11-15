@@ -5,6 +5,10 @@ import { nextSerialNumber } from "../utils/coding";
 import { displayDate } from "../utils/dateDisplay";
 import { normalizeSerial } from "./voucherService";
 import { saleTotals } from "./storeSaleService";
+import { getBaseCurrencyDecimals } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
+import { roundToCurrencyDecimals } from "../utils/currencyConversion";
+import { parseDateOnlyUtc } from "../utils/inputParse";
 
 // باشگاه مشتریان › «کارت وفاداری» — تنها محل قواعد.
 // • نوع شارژ: کد (خودکار) + عنوان + نوع (مبلغی/درصدی) + مقدار + «تنها یک‌بار قابل استفاده باشد». شارژ، نوع/مقدار/یک‌بارمصرف را کپی می‌کند (تغییر نوع بعداً شارژهای صادرشده را عوض نمی‌کند).
@@ -22,23 +26,12 @@ const EPS = 1e-6;
 const MAX_BULK = 5000;
 const dayStr = (d: Date) => d.toISOString().slice(0, 10);
 const userId = () => getRequestContext()?.userId ?? null;
-const partyTitle = (p: any) => (p ? p.detailTitle || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.name || "" : "");
 const todayUtc = () => {
   const n = new Date();
   return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
 };
 
-function parseDate(raw: unknown, label: string): Date {
-  const d = new Date(String(raw ?? ""));
-  if (!raw || Number.isNaN(d.getTime())) throw new LoyaltyError(`${label} الزامی و باید معتبر باشد`);
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-async function baseDecimals() {
-  const c = await prisma.currency.findFirst({ where: { isBase: true } });
-  return c?.decimalPlaces ?? 0;
-}
-const roundTo = (x: number, dp: number) => Math.round(x * 10 ** dp) / 10 ** dp;
+const parseDate = (raw: unknown, label: string): Date => parseDateOnlyUtc(raw, label, (m) => new LoyaltyError(m));
 
 const KIND_FA = { AMOUNT: "مبلغی", PERCENT: "درصدی" } as const;
 
@@ -63,7 +56,7 @@ async function cleanType(b: ChargeTypeBody, existingId?: number) {
     if (value > 100) throw new LoyaltyError("درصد نمی‌تواند بیشتر از ۱۰۰ باشد");
     if (Math.abs(value * 100 - Math.round(value * 100)) > 1e-6) throw new LoyaltyError("درصد حداکثر ۲ رقم اعشار دارد");
   } else {
-    const dp = await baseDecimals();
+    const dp = await getBaseCurrencyDecimals();
     if (Math.abs(value * 10 ** dp - Math.round(value * 10 ** dp)) > 1e-6) throw new LoyaltyError(`مبلغ حداکثر ${dp} رقم اعشار دارد`);
   }
   if (existingId) {
@@ -140,7 +133,7 @@ async function cleanCard(b: CardBody, existingId?: number) {
   return { partyId, cardNumber, password, issueDate, expiryDate, isActive: b.isActive !== false };
 }
 
-export const cardShape = (c: any, today = todayUtc()) => ({
+const cardShape = (c: any, today = todayUtc()) => ({
   id: c.id,
   partyId: c.partyId,
   partyTitle: partyTitle(c.party),
@@ -195,7 +188,7 @@ export interface ChargeUsage {
   count: number;
 }
 
-export async function chargeUsage(ids: number[]): Promise<Map<number, ChargeUsage>> {
+async function chargeUsage(ids: number[]): Promise<Map<number, ChargeUsage>> {
   if (!ids.length) return new Map();
   const rows = await prisma.storeReceipt.groupBy({ by: ["loyaltyChargeId"], where: { loyaltyChargeId: { in: ids } }, _sum: { amount: true }, _count: true });
   return new Map(rows.map((r) => [r.loyaltyChargeId as number, { used: Number(r._sum.amount ?? 0), count: r._count }]));
@@ -205,7 +198,7 @@ export type ChargeStatus = "ACTIVE" | "USED" | "EXPIRED";
 const STATUS_FA: Record<ChargeStatus, string> = { ACTIVE: "قابل استفاده", USED: "مصرف‌شده", EXPIRED: "منقضی" };
 
 /** مانده (فقط مبلغی)، بسته‌شدن و وضعیت یک شارژ؛ «مصرف‌شده» بر «منقضی» مقدم است */
-export function chargeState(c: { kind: string; value: any; singleUse: boolean; expiryDate: Date | null }, u: ChargeUsage | undefined, today = todayUtc()) {
+function chargeState(c: { kind: string; value: any; singleUse: boolean; expiryDate: Date | null }, u: ChargeUsage | undefined, today = todayUtc()) {
   const used = u?.used ?? 0;
   const count = u?.count ?? 0;
   const remaining = c.kind === "AMOUNT" ? Math.max(0, Number(c.value) - used) : null;
@@ -217,7 +210,7 @@ export function chargeState(c: { kind: string; value: any; singleUse: boolean; e
 
 const CHARGE_INCLUDE = { card: { select: { cardNumber: true, party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } }, type: { select: { title: true } } } as const;
 
-export function chargeShape(c: any, u: ChargeUsage | undefined) {
+function chargeShape(c: any, u: ChargeUsage | undefined) {
   const st = chargeState(c, u);
   return {
     id: c.id,
@@ -357,7 +350,7 @@ export async function authenticateCard(cardNumberRaw: unknown, password: unknown
 }
 
 /** یافتن کارت فعال و منقضی‌نشده با شماره‌ی کارت (بدون کلمه‌ی عبور)؛ برای نمایش شارژها پیش از تایید. کلمه‌ی عبور هنگام ثبت کنترل می‌شود. */
-export async function findUsableCard(cardNumberRaw: unknown, date: Date) {
+async function findUsableCard(cardNumberRaw: unknown, date: Date) {
   const cardNumber = normalizeSerial(cardNumberRaw);
   if (!cardNumber) throw new LoyaltyError("شماره‌ی کارت وفاداری را وارد کنید");
   const card = await prisma.loyaltyCard.findUnique({ where: { cardNumber }, include: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } });
@@ -368,9 +361,9 @@ export async function findUsableCard(cardNumberRaw: unknown, date: Date) {
 }
 
 /** مبلغ کسر یک شارژ از یک فاکتور: مبلغی = min(مانده، باقی‌مانده‌ی فاکتور)؛ درصدی = درصد × قابل پرداخت (حداکثر باقی‌مانده) */
-export function chargeDeduction(c: { kind: string; value: any }, remaining: number | null, payable: number, due: number, dp: number) {
-  const raw = c.kind === "AMOUNT" ? Math.min(remaining ?? 0, due) : Math.min(roundTo((payable * Number(c.value)) / 100, dp), due);
-  return Math.max(0, roundTo(raw, dp));
+function chargeDeduction(c: { kind: string; value: any }, remaining: number | null, payable: number, due: number, dp: number) {
+  const raw = c.kind === "AMOUNT" ? Math.min(remaining ?? 0, due) : Math.min(roundToCurrencyDecimals((payable * Number(c.value)) / 100, dp), due);
+  return Math.max(0, roundToCurrencyDecimals(raw, dp));
 }
 
 async function saleContext(tx: any, saleId: number) {
@@ -404,7 +397,7 @@ export async function lookupCard(body: { cardNumber?: unknown; cardId?: unknown;
     cards = list.map((c) => ({ id: c.id, cardNumber: c.cardNumber }));
     card = list.find((c) => c.id === Number(body.cardId)) ?? list[0];
   }
-  const dp = await baseDecimals();
+  const dp = await getBaseCurrencyDecimals();
   const saleId = Number(body.saleId) || 0;
   const ctx = saleId ? await saleContext(prisma, saleId) : null;
   const rows = await prisma.loyaltyCharge.findMany({ where: { cardId: card.id, date: { lte: date }, OR: [{ expiryDate: null }, { expiryDate: { gte: date } }] }, include: { type: { select: { title: true } } }, orderBy: [{ expiryDate: { sort: "asc", nulls: "last" } }, { id: "asc" }] });
@@ -453,7 +446,7 @@ export interface LoyaltyRedemption {
 export async function redeemChargesInTx(tx: any, saleId: number, cardId: number, items: { id: number; amount?: number }[], date: Date): Promise<LoyaltyRedemption[]> {
   const chargeIds = items.map((i) => i.id);
   if (new Set(chargeIds).size !== chargeIds.length) throw new LoyaltyError("یک شارژ بیش از یک بار انتخاب شده است");
-  const dp = await baseDecimals();
+  const dp = await getBaseCurrencyDecimals();
   await tx.$queryRawUnsafe(`SELECT "id" FROM "LoyaltyCharge" WHERE "id" IN (${chargeIds.map((n) => Number(n)).join(",")}) ORDER BY "id" FOR UPDATE`);
   const charges = await tx.loyaltyCharge.findMany({ where: { id: { in: chargeIds } }, include: { type: { select: { title: true } }, card: { select: { cardNumber: true } } } });
   if (charges.length !== chargeIds.length) throw new LoyaltyError("شارژ انتخابی یافت نشد");
@@ -478,13 +471,13 @@ export async function redeemChargesInTx(tx: any, saleId: number, cardId: number,
     let amount = chargeDeduction(c, st.remaining, ctx.payable, due, dp);
     // شارژ مبلغی: کاربر می‌تواند کمتر از سقف مصرف کند (بیشتر از سقف = مانده‌ی شارژ/باقی‌مانده‌ی فاکتور مجاز نیست)
     if (c.kind === "AMOUNT" && item.amount !== undefined && item.amount !== null) {
-      const want = roundTo(Number(item.amount), dp);
+      const want = roundToCurrencyDecimals(Number(item.amount), dp);
       if (!(want > EPS)) throw new LoyaltyError(`مبلغ مصرف ${label} باید بزرگ‌تر از صفر باشد`);
       if (want - amount > EPS) throw new LoyaltyError(`مبلغ مصرف ${label} بیشتر از حداکثر مجاز (${amount}) است`);
       amount = want;
     }
     if (amount <= EPS) throw new LoyaltyError(`برای ${label} مبلغی قابل کسر نیست (باقی‌مانده‌ی فاکتور صفر است)`);
-    due = roundTo(due - amount, dp);
+    due = roundToCurrencyDecimals(due - amount, dp);
     out.push({ chargeId: id, amount, cardNumber: c.card.cardNumber, typeTitle: c.type.title });
   }
   return out;

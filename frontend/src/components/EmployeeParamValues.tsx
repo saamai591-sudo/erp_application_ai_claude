@@ -29,7 +29,7 @@ interface Row {
   lockedReason: string | null;
 }
 
-export const fmtParamValue = (type: string, v: string) =>
+const fmtParamValue = (type: string, v: string) =>
   toFaDigits(Number(v).toLocaleString("en-US", { maximumFractionDigits: 4 }));
 
 export function EmployeeParamValues({ employeeId, canEdit }: { employeeId: number; canEdit: boolean }) {

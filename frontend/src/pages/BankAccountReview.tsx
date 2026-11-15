@@ -15,6 +15,7 @@ import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { appendSortParams } from "../lib/gridSort";
 import { ColumnFilterType, ActiveFilter } from "../components/DataTable";
+import { SignedCell, numCol } from "../components/reviewColumns";
 
 // گزارش «مرور حساب بانکی» (خزانه‌داری > گزارش) — هم‌فرمت «مرور فروش»/«مرور مبلغی انبار»: تب‌های زنجیره‌ای
 // (ChainedTabsBar + useChainedMultiSelect)، انتخاب چند ردیف در یک تب فیلتر تب‌های دیگر را اعمال می‌کند.
@@ -81,23 +82,6 @@ const DOC_ROUTE: Record<string, string> = {
 };
 
 /** اعداد منفی به‌شکل متعارف حسابداری (داخل پرانتز و قرمز) — کلاس olap-amount-negative از قبل در styles.css هست. */
-function SignedCell({ value }: { value: number }) {
-  const negative = value < 0;
-  const text = negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value);
-  return <span className={negative ? "olap-amount-negative" : undefined}>{text}</span>;
-}
-
-function numCol(header: string, field: keyof DimRow, signed = false): BalanceTableColumn<DimRow> {
-  return {
-    header,
-    render: (r) => (signed ? <SignedCell value={(r[field] as number) || 0} /> : formatAmountFa((r[field] as number) || 0)),
-    sortValue: (r) => (r[field] as number) || 0,
-    filterType: "number",
-    filterValue: (r) => (r[field] as number) || 0,
-    decimal: true,
-  };
-}
-
 // کلیدها باید دقیقاً با LEDGER_COLUMN_DEFS در backend/src/routes/bankAccountReview.ts یکی باشند
 const LEDGER_COLUMNS: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
   { header: "نوع", field: "type", render: (r) => <span className="badge">{r.type}</span>, sortValue: (r) => r.type, filterType: "string", filterValue: (r) => r.type },
@@ -116,7 +100,7 @@ const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(LEDGER_
 export default function BankAccountReview() {
   const { openTab } = useTabs();
   const snapshot = getBankAccountReviewSnapshot();
-  const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
+  const [, setPeriods] = useState<FiscalPeriodRange[]>([]);
   const [periodsLoaded, setPeriodsLoaded] = useState(false);
   const [filters, setFilters] = useState(snapshot?.filters ?? { fromDate: "", toDate: "" });
   const [activeTab, setActiveTab] = useState(snapshot?.activeTab ?? 0);

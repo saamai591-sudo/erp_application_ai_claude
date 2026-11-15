@@ -12,7 +12,7 @@ import { normalizeDesign, type PrintDesignSchema } from "./printDesign";
 
 export type LayoutBlockType = "text" | "image" | "box" | "line" | "totals" | "banks";
 export type LayoutBand = "header" | "after" | "footer";
-export const LAYOUT_BANDS: LayoutBand[] = ["header", "after", "footer"];
+const LAYOUT_BANDS: LayoutBand[] = ["header", "after", "footer"];
 /** انواع سندی که طراحی بصری دارند (فعلاً پیش‌فاکتور و فاکتور فروش؛ سند حسابداری صفحه‌بندی سرور دارد) */
 export const VISUAL_LAYOUT_TYPES = new Set(["SALES_QUOTE", "SALES_INVOICE"]);
 const BLOCK_TYPES: LayoutBlockType[] = ["text", "image", "box", "line", "totals", "banks"];
@@ -188,7 +188,7 @@ function esc(s: string): string {
 }
 
 /** متن بلوک → HTML امن: همه‌چیز escape می‌شود جز {{مسیرِ مجاز}}؛ «\n» → <br> */
-export function renderBlockText(text: string): string {
+function renderBlockText(text: string): string {
   let out = "";
   let last = 0;
   for (const m of text.matchAll(TOKEN_RE)) {

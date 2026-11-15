@@ -22,6 +22,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
 
 // «کسری انبارگردانی» — طبق تصمیم صریح کاربر، سندی مستقل از «اضافات انبارگردانی» (که از این پس
 // فقط مازاد را می‌پذیرد): یک حواله‌ی خروج مستقیم و ساده، بدون مبنا، بدون هیچ مقایسه‌ای با موجودی
@@ -60,10 +61,6 @@ export default function InventoryCountingShortages() {
   if (isNew) return <InventoryCountingShortageForm basePath={basePath} />;
   if (isEdit) return <InventoryCountingShortageForm basePath={basePath} editId={Number(id)} />;
   return <InventoryCountingShortageList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function InventoryCountingShortageList({ basePath }: { basePath: string }) {
@@ -158,7 +155,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
 
   const detailConfig = useDocDetailConfig("INVENTORY_COUNTING_SHORTAGE");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; description: string; details: DetailValues },
     RowState,
     Detail

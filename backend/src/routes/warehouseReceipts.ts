@@ -15,6 +15,7 @@ import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 import { tempLineRemaining, tempNetBySource, tempLineUsage } from "../services/tempReceiptService";
+import { partyTitleOrNull } from "../utils/partyTitle";
 
 const FORM = findFormPrefix("warehousing-warehouse-receipts");
 
@@ -453,11 +454,6 @@ router.get("/warehouse-receipts/pickable-temp-receipt-lines", can(`${FORM}.view`
 // CRUD + قطعی‌کردن/برگشت
 // =========================================================================
 
-function partyTitle(p: any): string | null {
-  if (!p) return null;
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 // دسترسی «مشاهده اطلاعات حسابداری» — بدون این دسترسی، فیلدهای فی/مبلغ/جمع‌مبلغ اصلاً در پاسخ API قرار
 // نمی‌گیرند (نه فقط در فرانت‌اند مخفی می‌شوند)؛ همان کدِ دقیق seed شده در prisma/seed.ts.
 const VIEW_ACCOUNTING_PERMISSION = `${findFormPrefix("warehousing-warehouse-receipts")}.viewAccounting`;
@@ -488,7 +484,7 @@ router.get("/warehouse-receipts", can(`${FORM}.view`), async (req: AuthedRequest
         fiscalPeriodTitle: d.fiscalPeriod.title,
         basis: d.basis,
         partyId,
-        partyTitle: partyTitle(partyId ? partyById.get(partyId) : null),
+        partyTitle: partyTitleOrNull(partyId ? partyById.get(partyId) : null),
         description: d.description,
         status: d.status,
         lineCount: d.lines.length,
@@ -532,7 +528,7 @@ router.get("/warehouse-receipts/:id", can(`${FORM}.view`), async (req: AuthedReq
     basis: d.basis,
     partyId,
     partyDetailCode: d.detailCode,
-    partyTitle: partyTitle(party),
+    partyTitle: partyTitleOrNull(party),
     description: d.description,
     status: d.status,
     finalizedAt: d.finalizedAt,

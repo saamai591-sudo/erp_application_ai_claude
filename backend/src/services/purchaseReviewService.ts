@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { getLineAmounts } from "./documentItemAmountService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // گزارش «مرور خرید» (زنجیره تامین > گزارش) — هم‌الگوی «مرور فروش» (services/salesReviewService.ts) — منبع داده‌ی مشترک همه‌ی تب‌ها.
@@ -27,7 +28,7 @@ export interface PurchaseLineFilters {
 export type PurchaseDocumentKind = "GOODS" | "SERVICE";
 
 /** «نوع خرید» ناشناخته‌ی ردیف‌های برگشت از خرید */
-export const UNKNOWN_PURCHASE_TYPE_ID = 0;
+const UNKNOWN_PURCHASE_TYPE_ID = 0;
 
 interface PurchaseDimensionFields {
   supplierPartyId: number;
@@ -63,11 +64,6 @@ export interface PurchaseReturnLine extends PurchaseDimensionFields {
   supplierReturnId: number;
   supplierReturnNumber: number;
   date: Date;
-}
-
-function partyTitle(p: any): string {
-  if (!p) return "";
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
 /** کد نمایشی تامین‌کننده: کد تامین‌کننده‌ی تعریف‌شده، وگرنه کد تفصیلی طرف حساب */

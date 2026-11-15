@@ -16,6 +16,7 @@ import {
   pickableLoans,
   ymOf,
 } from "../services/payrollLoanService";
+import { partyTitle } from "../utils/partyTitle";
 
 // حقوق و دستمزد › وام: نوع وام، پرداخت وام، اصلاح مانده و قسط، تعلیق وام (منطق مانده و قسط: services/payrollLoanService.ts).
 
@@ -31,9 +32,6 @@ function fail(res: any, e: any, fallback: string) {
   if (e?.statusCode || e?.status) return res.status(e.statusCode ?? e.status).json({ error: e.message });
   return res.status(400).json({ error: e?.message || fallback });
 }
-
-const partyName = (p: { firstName: string | null; lastName: string | null; name: string | null }) => [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "";
-const mon = (m: { year: number; month: number } | null | undefined) => (m ? { year: m.year, month: m.month } : null);
 
 function wholeAmount(v: unknown, label: string): number {
   const n = Number(v);
@@ -67,7 +65,7 @@ async function activeEmployeesAt(date: Date, ids?: number[]) {
   return emps.map((e) => ({
     id: e.id,
     personnelCode: e.personnelCode,
-    fullName: partyName(e.party),
+    fullName: partyTitle(e.party),
     employmentType: e.decrees[0]?.employmentType?.title ?? "",
     serviceLocation: e.assignments[0]?.orgUnit?.title ?? "",
   }));
@@ -193,7 +191,7 @@ const shapeLoan = (l: any, lockedReason: string | null = null) => ({
   paymentDate: day(l.paymentDate),
   employeeId: l.employeeId,
   personnelCode: l.employee.personnelCode,
-  employeeName: partyName(l.employee.party),
+  employeeName: partyTitle(l.employee.party),
   loanTypeId: l.loanTypeId,
   loanTypeTitle: l.loanType.title,
   amount: Number(l.amount),

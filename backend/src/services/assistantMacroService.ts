@@ -38,7 +38,7 @@ interface PresetLine {
   quantity: number | null;
 }
 /** فیلدهای قابل «حتماً بپرس» */
-export const ASKABLE_FIELDS = ["salesType", "salesCenter", "description", "discountPercent"] as const;
+const ASKABLE_FIELDS = ["salesType", "salesCenter", "description", "discountPercent"] as const;
 /** پیش‌تعیین ابزار و موضوعات رسید دریافت (فقط برای کار «receipt») */
 export interface ReceiptPreset {
   instruments: { type: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS"; cashBoxId: number | null; bankAccountId: number | null; cardReaderId: number | null }[];
@@ -78,7 +78,7 @@ async function itemTitles(macros: any[]): Promise<Map<number, string>> {
   return new Map(items.map((i) => [i.id, i.title]));
 }
 
-export function macroShape(m: any, titles: Map<number, string> = new Map()) {
+function macroShape(m: any, titles: Map<number, string> = new Map()) {
   return {
     id: m.id,
     phrase: m.phrase,

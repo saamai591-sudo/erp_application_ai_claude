@@ -35,7 +35,6 @@ export default function Roles() {
 
 function RoleList() {
   const { items, loading, error, remove, reload } = useCrud<Role>("/roles");
-  const navigate = useNavigate();
   return (
     <div>
       <div className="page-header">

@@ -1,5 +1,40 @@
-import { getCurrentFiscalPeriod } from "../lib/prisma";
+import { getCurrentFiscalPeriod, prisma } from "../lib/prisma";
 import { formatJalaliDateForMessage } from "./jalaliDate";
+import { assertDateNotConfirmed } from "./journalEntryValidation";
+
+/**
+ * منبع حقیقتِ «تاریخ سند ← دوره مالی»: دوره‌ی مالیِ شامل تاریخ را پیدا می‌کند (نبودنش خطاست) و آن را با دوره‌ی مالی «جاری»
+ * تطبیق می‌دهد. `makeError` برای ماژول‌هایی است که خطای مخصوص خودشان را پرتاب می‌کنند (فروش فروشگاهی، بن‌کارت، …).
+ * قبلاً در ده‌ها فایل کپی شده بود.
+ */
+export async function resolveCurrentYearFiscalPeriod(date: Date, makeError: (message: string) => Error = (m) => new Error(m), client: any = prisma) {
+  const fiscalPeriod = await client.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
+  if (!fiscalPeriod) throw makeError("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
+  return fiscalPeriod;
+}
+
+/** همان resolveCurrentYearFiscalPeriod، به‌علاوه‌ی کنترل «اسناد تاییدشده» (ثبت سند با تاریخ قبل از آخرین تایید ممنوع است). `client` برای اجرا داخل تراکنش است. */
+export async function resolveDocumentFiscalPeriod(date: Date, client: any = prisma) {
+  const fiscalPeriod = await resolveCurrentYearFiscalPeriod(date, undefined, client);
+  await assertDateNotConfirmed(client, date, fiscalPeriod.id);
+  return fiscalPeriod;
+}
+
+/** دوره‌ی مالی جاری (نبودنش خطاست). */
+export async function requireCurrentFiscalPeriod() {
+  const current = await getCurrentFiscalPeriod();
+  if (!current) throw new Error("دوره مالی جاری یافت نشد");
+  return current;
+}
+
+/** دوره‌ی جاری و دوره‌ی بعد از آن (برای عملیات «بستن سال»؛ next ممکن است هنوز تعریف نشده باشد). */
+export async function getCloseContext() {
+  const current = await getCurrentFiscalPeriod();
+  if (!current) throw new Error("دوره مالی جاری مشخص نیست");
+  const next = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { gt: current.toDate } }, orderBy: { fromDate: "asc" } });
+  return { current, next };
+}
 
 /**
  * تاریخ سند باید در بازه‌ی همان دوره مالی «جاری» (انتخاب‌شده در تنظیمات کاربر، وگرنه آخرین دوره مالی —

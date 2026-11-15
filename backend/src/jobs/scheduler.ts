@@ -11,7 +11,6 @@ const TICK_MS = 60_000;
 /** اجرایی که بیش از این RUNNING مانده، قطع‌شده فرض می‌شود */
 const STALE_RUN_MS = 6 * 60 * 60 * 1000;
 
-let timer: NodeJS.Timeout | null = null;
 let ticking = false;
 
 export function isSchedulerEnabled(): boolean {
@@ -33,7 +32,7 @@ async function recoverStaleRuns(onlyOlderThanMs?: number) {
 }
 
 /** یک دور بررسی: کارهای سررسیدشده را اجرا می‌کند (زمان‌بند هر دقیقه همین را صدا می‌زند؛ برای تست هم export شده) */
-export async function runDueJobs() {
+async function runDueJobs() {
   if (ticking) return;
   ticking = true;
   try {
@@ -83,7 +82,7 @@ export async function startScheduler(): Promise<void> {
   }
   // فرایند تازه شروع شده؛ هر اجرای RUNNING از فرایند قبلی است
   await recoverStaleRuns();
-  timer = setInterval(() => {
+  setInterval(() => {
     void runDueJobs();
   }, TICK_MS);
   // فراخوانی اول با کمی تأخیر تا راه‌اندازی بک‌اند کامل شود
@@ -91,7 +90,3 @@ export async function startScheduler(): Promise<void> {
   console.log("[scheduler] روشن شد؛ هر یک دقیقه کارهای سررسیدشده بررسی می‌شوند");
 }
 
-export function stopScheduler() {
-  if (timer) clearInterval(timer);
-  timer = null;
-}

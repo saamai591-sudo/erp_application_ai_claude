@@ -21,6 +21,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { PlusIcon } from "../components/icons";
 
 // «برگشت مصرف پروژه» — همان الگوی CenterConsumptionReturns.tsx (طرف مقابل: پروژه به‌جای مرکز هزینه).
 // طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد — یک
@@ -49,10 +50,6 @@ export default function ProjectConsumptionReturns() {
   if (isNew) return <ProjectConsumptionReturnForm basePath={basePath} />;
   if (isEdit) return <ProjectConsumptionReturnForm basePath={basePath} editId={Number(id)} />;
   return <ProjectConsumptionReturnList basePath={basePath} />;
-}
-
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
 function ProjectConsumptionReturnList({ basePath }: { basePath: string }) {
@@ -127,7 +124,7 @@ function ProjectConsumptionReturnForm({ editId, basePath }: { editId?: number; b
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("PROJECT_CONSUMPTION_RETURN");
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; description: string; details: DetailValues },
     RowState,
     Detail

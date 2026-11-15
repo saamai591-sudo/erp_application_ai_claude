@@ -14,6 +14,7 @@ import { api, downloadFile } from "../lib/api";
 import { showError, showToast } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
+import { CheckIcon, UndoIcon } from "../components/icons";
 
 // «دفاتر تجاری» (امور مالیاتی › عملیات): گروهی از اسناد تجمیعی یک بازه + خروجی CSV (فرمت نمونه: Documents/TaxLedger.CSV).
 // وضعیت: پیش‌نویس ⇄ تاییدشده؛ دفتر تاییدشده حذف نمی‌شود و سند تجمیعیِ ثبت‌شده در دفتر هم (در بک‌اند کنترل می‌شود).
@@ -109,7 +110,6 @@ function LedgerList() {
 
 /** «جدید» = تهیه‌ی دفتر: از تاریخ خودکار و غیرقابل ویرایش، تا تاریخ را کاربر تعیین می‌کند */
 function IssueForm() {
-  const navigate = useNavigate();
   const { flash } = useSavedFlash();
   const [toDate, setToDate] = usePersistedState("form:/trade-ledgers/new:toDate", "");
   const [fromDate, setFromDate] = useState<string>("");
@@ -204,21 +204,6 @@ function ItemsGrid({ items }: { items: LedgerItem[] }) {
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 function DownloadIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">

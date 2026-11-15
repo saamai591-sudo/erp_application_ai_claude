@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
-import { AssetError } from "./assetError";
+import { AssetError, assetBulkFail } from "./assetError";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { findIssuingDocType } from "./documentTypeService";
 import { assetAccountOf } from "./assetAccountSettingService";
@@ -9,6 +9,7 @@ import { recordSettingUsage } from "./settingUsageService";
 import { fillAssetDetails } from "./assetJournalDetails";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { addDays, day, daysBetween, splitByPositions } from "./assetDepreciationService";
+import { getBaseCurrencyDecimals } from "./baseCurrencyService";
 
 // «بیمه دارایی‌ها»: یک بیمه‌نامه = یک ردیف (قلم) فاکتور خرید خدمات تاییدشده + بازه‌ی بیمه + پلاک‌های تحت پوشش با «مبلغ برآوردی».
 // مبلغ واقعی هر پلاک (shareAmount) = خالص ردیف فاکتور (ارز پایه) × سهم برآوردیِ پلاک از جمع برآوردها (باقیمانده‌ی گرد کردن روی آخرین پلاک).
@@ -22,12 +23,6 @@ const D = (v: any) => new Prisma.Decimal(v ?? 0);
 const fail = (m: string): never => {
   throw new AssetError(m);
 };
-function bulkFail(summary: string, details: Record<string, unknown>[]): never {
-  const err = new AssetError(summary);
-  err.details = details;
-  throw err;
-}
-
 /** include لازم برای ساخت ردیف سند حسابداری از آیتم‌های هزینه‌ی بیمه (مرکز هزینه/پروژه‌ی موقعیت + طرف حساب = بیمه‌گر فاکتور) */
 export const INSURANCE_ITEM_INCLUDE = {
   asset: { select: { detailCode: true } },
@@ -40,11 +35,6 @@ export const INSURANCE_ITEM_INCLUDE = {
 export const insuranceTypeOf = (it: any): number | null => it.policyItem?.policy?.insuranceTypeId ?? null;
 
 export const insurerCodeOf = (it: any): string | null => it.policyItem?.policy?.costLine?.servicePurchaseInvoice?.party?.detailCode ?? null;
-
-async function baseDecimals(): Promise<number> {
-  const c = await prisma.currency.findFirst({ where: { isBase: true } });
-  return c?.decimalPlaces ?? 0;
-}
 
 /** خالص ردیف فاکتور به ارز مبنا */
 const netOf = (line: { baseAmount: any; baseDiscount: any }) => D(line.baseAmount).sub(D(line.baseDiscount));
@@ -128,7 +118,7 @@ export async function savePolicy(id: number | null, body: PolicyBody) {
   const rows = (body.items ?? []).map((x) => ({ assetId: Number(x.assetId), est: D(String(x.estimatedAmount ?? "0").replace(/,/g, "")) }));
   if (!rows.length) fail("حداقل یک دارایی لازم است");
   if (new Set(rows.map((r) => r.assetId)).size !== rows.length) fail("یک دارایی بیش از یک‌بار آمده است");
-  const dec = await baseDecimals();
+  const dec = await getBaseCurrencyDecimals();
   const assets = await prisma.fixedAsset.findMany({ where: { id: { in: rows.map((r) => r.assetId) } } });
   const problems: Record<string, unknown>[] = [];
   for (const r of rows) {
@@ -139,7 +129,7 @@ export async function savePolicy(id: number | null, body: PolicyBody) {
     else if (a.status !== "ACTIVE") problems.push({ ...row, "علت": "دارایی فعال نیست" });
     if (!r.est.gt(0)) problems.push({ ...row, "علت": "مبلغ برآوردی باید بزرگ‌تر از صفر باشد" });
   }
-  if (problems.length) bulkFail("ذخیره‌ی بیمه‌نامه انجام نشد", problems);
+  if (problems.length) assetBulkFail("ذخیره‌ی بیمه‌نامه انجام نشد", problems);
   const shares = allocateShares(net, rows.map((r) => r.est), dec);
   const itemsData = rows.map((r, i) => ({ assetId: r.assetId, estimatedAmount: r.est, shareAmount: shares[i] }));
   const fp = await getCurrentFiscalPeriod();
@@ -292,11 +282,6 @@ export async function createStubInsurance(tx: any, assetId: number, group: { id:
 
 // ───────────── محاسبه‌ی دوره‌ای ─────────────
 
-export async function lastInsuranceCalculatedEnd(): Promise<Date | null> {
-  const run = await prisma.assetInsuranceRun.findFirst({ orderBy: { reportingPeriod: { toDate: "desc" } }, select: { reportingPeriod: { select: { toDate: true } } } });
-  return run?.reportingPeriod.toDate ?? null;
-}
-
 export async function listInsurancePeriods() {
   const periods = await prisma.reportingPeriod.findMany({ orderBy: [{ fromDate: "asc" }], include: { assetInsuranceRun: { include: { journalEntry: { select: { id: true, referenceNumber: true } } } } } });
   return periods.map((p) => ({
@@ -320,7 +305,7 @@ export async function calculateInsurance(reportingPeriodId: number, userId: numb
   const earlier = await prisma.reportingPeriod.findMany({ where: { fiscalPeriodId: period.fiscalPeriodId, fromDate: { lt: period.fromDate } }, include: { assetInsuranceRun: true }, orderBy: { fromDate: "asc" } });
   const missing = earlier.find((p) => !p.assetInsuranceRun);
   if (missing) fail(`ابتدا هزینه‌ی بیمه‌ی دوره‌ی «${missing.title}» را محاسبه کنید (دوره‌ها به ترتیب محاسبه می‌شوند)`);
-  const dec = await baseDecimals();
+  const dec = await getBaseCurrencyDecimals();
 
   const pitems = await withoutFiscalPeriodScope(() =>
     prisma.assetInsurancePolicyItem.findMany({
@@ -339,7 +324,7 @@ export async function calculateInsurance(reportingPeriodId: number, userId: numb
     for (const sg of segs) toCreate.push({ policyItemId: pi.id, assetId: pi.assetId, positionId: sg.positionId, assetGroupId: pi.asset.assetGroupId, fromDate: sg.from, toDate: sg.to, days: sg.days, amount: sg.amount, costCenterId: sg.costCenterId, projectId: sg.projectId });
     total = total.add(r.amount);
   }
-  if (problems.length) bulkFail("محاسبه‌ی هزینه‌ی بیمه انجام نشد", problems);
+  if (problems.length) assetBulkFail("محاسبه‌ی هزینه‌ی بیمه انجام نشد", problems);
 
   return prisma.$transaction(
     async (tx) => {
@@ -396,11 +381,11 @@ export async function issueInsuranceEntry(reportingPeriodId: number) {
     if (prepaid) usedAssetSettingIds.add(prepaid.settingId);
     accounts.set(accKey(pair.gid, pair.typeId), { expense, prepaid });
   }
-  if (problems.length) bulkFail("صدور سند هزینه‌ی بیمه انجام نشد", problems);
+  if (problems.length) assetBulkFail("صدور سند هزینه‌ی بیمه انجام نشد", problems);
 
   const net = new Map<string, { accountId: number; d: [string | null, string | null, string | null]; amount: Prisma.Decimal }>();
   const post = (a: any, it: (typeof items)[number], label: string, signed: Prisma.Decimal) => {
-    const r = fillAssetDetails(a.account, { plaque: it.asset.detailCode, costCenter: it.position.costCenter.detailCode, project: it.position.project?.detailCode ?? null, party: insurerCodeOf(it) }, label);
+    const r = fillAssetDetails(a.account, { costCenter: it.position.costCenter.detailCode, project: it.position.project?.detailCode ?? null, party: insurerCodeOf(it) }, label);
     if (r.error) { problems.push({ "پلاک": it.asset.detailCode, "علت": r.error }); return; }
     const key = [a.account.id, signed.gt(0) ? "D" : "C", ...r.details.map((x) => x ?? "")].join("|");
     const cur = net.get(key);
@@ -412,7 +397,7 @@ export async function issueInsuranceEntry(reportingPeriodId: number) {
     post(ga.expense, it, "هزینه بیمه", D(it.amount));
     post(ga.prepaid, it, "پیش‌پرداخت بیمه", D(it.amount).neg());
   }
-  if (problems.length) bulkFail("صدور سند هزینه‌ی بیمه انجام نشد", problems);
+  if (problems.length) assetBulkFail("صدور سند هزینه‌ی بیمه انجام نشد", problems);
 
   const description = `بابت هزینه‌ی بیمه‌ی دارایی‌های ثابت دوره‌ی ${run.reportingPeriod.title} (${formatJalaliDateForMessage(run.reportingPeriod.fromDate)} تا ${formatJalaliDateForMessage(run.reportingPeriod.toDate)})`;
   const lines: IssueLineInput[] = Array.from(net.values()).map((x) => ({
@@ -453,7 +438,7 @@ export async function revertInsuranceEntry(reportingPeriodId: number) {
 export async function bookValuesAt(assetIds: number[], dateStr: string) {
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime()) || !assetIds.length) return [];
-  const dec = await baseDecimals();
+  const dec = await getBaseCurrencyDecimals();
   const assets = await prisma.fixedAsset.findMany({ where: { id: { in: assetIds } }, select: { id: true, cost: true, openingAccumulatedDepreciation: true, depreciationItems: { select: { amount: true, toDate: true } } } });
   return assets.map((a) => {
     if (!a.cost) return { assetId: a.id, bookValue: null as string | null };

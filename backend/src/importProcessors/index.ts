@@ -15,6 +15,10 @@ import { createCenterConsumption } from "../routes/centerConsumptions";
 import { createWarehouseAdjustment } from "../routes/warehouseAdjustments";
 import { createInventoryCountingShortage } from "../routes/inventoryCountingShortages";
 import { createSalesQuote } from "../routes/salesOperations";
+import { createStoreSale } from "../services/storeSaleService";
+import { runWithRequestContext } from "../lib/requestContext";
+import { userHasAction } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
 import { isPriceListUsed } from "../services/salesPriceService";
 import { createParty } from "../services/partyService";
 import { createPayrollComponent, PayrollCalcError } from "../services/payrollCalculationService";
@@ -24,10 +28,10 @@ import { findPartyByNationalId } from "../services/partyService";
 import { bulkSetValues, listParametersOfKind } from "../services/personnelValueService";
 import { upsertSalaryAccount } from "../services/employeeSalaryAccountService";
 import { cleanEntry, createEntry } from "../services/attendanceLeaveBalanceService";
+import { createMapping as createAttendanceDeviceMapping } from "../services/attendanceDeviceService";
 import { createOpeningLine } from "../services/partyBalanceOpeningService";
 import { DErr, prepareDataEntry, saveDataEntries, type DataEntryContext } from "../routes/payrollDataEntry";
 
-const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
 const DETAIL_TYPE_CASHBOX = 3;
 const DETAIL_TYPE_BANK_ACCOUNT = 4;
@@ -608,6 +612,28 @@ export function registerAllImportProcessors() {
         return { ok: true };
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت مانده‌ی مرخصی" };
+      }
+    },
+  });
+
+  // ── مدیریت تردد: نگاشت شناسه‌ی دستگاه ← کارمند ──
+  // هر ردیف = (نام اتصال، شناسه‌ی کاربر در دستگاه، کد پرسنلی). ثبت از همان createMapping فرم «نگاشت شناسه‌ی دستگاه» است (یکتایی، پردازش خودکار ثبت‌های در انتظار).
+  registerImportEntity("attendance-device-mapping", {
+    row: async (row, ctx) => {
+      try {
+        const connName = (row.connection ?? "").trim();
+        if (!connName) return { ok: false, error: "نام اتصال الزامی است" };
+        const conn = await prisma.attendanceDeviceConnection.findUnique({ where: { name: connName } });
+        if (!conn) return { ok: false, error: `اتصالی با نام «${connName}» یافت نشد` };
+        const code = toEnglishDigits((row.personnelCode ?? "").trim());
+        if (!code) return { ok: false, error: "کد پرسنلی الزامی است" };
+        const emps = await prisma.employee.findMany({ select: { id: true, personnelCode: true } });
+        const emp = emps.find((e) => e.personnelCode === code) ?? (/^\d+$/.test(code) ? emps.find((e) => /^\d+$/.test(e.personnelCode) && Number(e.personnelCode) === Number(code)) : undefined);
+        if (!emp) return { ok: false, error: `کارمندی با کد پرسنلی «${code}» یافت نشد` };
+        await createAttendanceDeviceMapping(conn.id, row.deviceUserId, emp.id, ctx.userId ?? null);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت نگاشت" };
       }
     },
   });
@@ -1459,6 +1485,73 @@ export function registerAllImportProcessors() {
         return { ok: true };
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت پیش‌فاکتور" };
+      }
+    },
+  });
+
+  // «فروش فروشگاهی» — هر ردیف اکسل یک ردیف کالا/خدمت؛ ردیف‌های هم‌«کلید فاکتور»+هم‌تاریخ یک فروش می‌شوند. شماره‌ی فروش خودکار (آخرین شماره‌ی دوره + ۱) است و
+  // «کلید فاکتور» فقط برای گروه‌بندی ردیف‌هاست. همه‌ی قواعد (شیفت و تاریخ، ایستگاه فعال، فی اعلامیه‌ی ایستگاه، ارزش افزوده، موجودی منفی، قفل تحویل)
+  // همان createStoreSale فرم است. فی خالی = فی اعلامیه؛ فیِ متفاوت فقط با مجوز «تغییر فی». ثبت‌کننده‌ی فروش = کاربرِ واردکننده. دریافت‌ها وارد نمی‌شوند.
+  registerImportEntity("store-sale", {
+    groupByKey: (row) => `${(row.invoiceKey || "").trim()}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const first = groupRows[0];
+        if (!(first.invoiceKey || "").trim()) return { ok: false, error: "«کلید فاکتور» الزامی است" };
+        if (!first.date) return { ok: false, error: "تاریخ الزامی است" };
+        const date = resolveDateString(first.date);
+
+        const shiftCode = Number(toEnglishDigits(first.shiftCode || "").trim());
+        const shift = shiftCode ? await prisma.salesShift.findUnique({ where: { code: shiftCode } }) : null;
+        if (!shift) return { ok: false, error: `شیفت با کد «${first.shiftCode || ""}» یافت نشد` };
+        const shiftDate = first.shiftDate ? resolveDateString(first.shiftDate) : date;
+
+        const customerCode = toEnglishDigits(first.customerDetailCode || "").trim();
+        let customerId: number | undefined;
+        if (customerCode) {
+          const party = await prisma.party.findFirst({ where: { detailCode: customerCode } });
+          const customer = party ? await prisma.customer.findUnique({ where: { partyId: party.id } }) : null;
+          if (!customer) return { ok: false, error: `مشتری با کد تفصیل «${customerCode}» یافت نشد` };
+          customerId = customer.id;
+        }
+
+        // سرصفحه‌ی همه‌ی ردیف‌های یک فروش باید یکی باشد (وگرنه ردیف‌های دو فروش اشتباهاً ادغام می‌شدند)
+        for (const [i, r] of groupRows.entries()) {
+          const same =
+            Number(toEnglishDigits(r.shiftCode || "").trim()) === shiftCode &&
+            (r.shiftDate ? resolveDateString(r.shiftDate) : resolveDateString(r.date)) === shiftDate &&
+            toEnglishDigits(r.customerDetailCode || "").trim() === customerCode;
+          if (!same) return { ok: false, error: `ردیف ${i + 1} از فروش «${first.invoiceKey}»: شیفت، تاریخ شروع شیفت و مشتری همه‌ی ردیف‌های یک فروش باید یکسان باشد` };
+        }
+
+        const lines: { goodsItemId: number; quantity: number; unitPrice?: number | null; description?: string | null }[] = [];
+        for (const [idx, row] of groupRows.entries()) {
+          const resolvedItem = await resolveGoodsItemByCode(row, idx);
+          if ("error" in resolvedItem) return { ok: false, error: resolvedItem.error };
+          const quantity = Number(toEnglishDigits(row.quantity || "").replace(/,/g, ""));
+          if (!(quantity > 0)) return { ok: false, error: `ردیف ${idx + 1}: مقدار باید عددی مثبت باشد` };
+          const rawPrice = toEnglishDigits(row.unitPrice || "").replace(/,/g, "").trim();
+          const unitPrice = rawPrice === "" ? null : Number(rawPrice);
+          if (unitPrice !== null && !(unitPrice >= 0)) return { ok: false, error: `ردیف ${idx + 1}: فی نامعتبر است` };
+          lines.push({ goodsItemId: resolvedItem.item.id, quantity, unitPrice, description: row.lineDescription || null });
+        }
+
+        // تکراری: فروشی با همین شیفت، تاریخ و اقلام (کالا + مقدار) از قبل هست (ورود دوباره‌ی همان فایل)
+        if (!ctx.allowDuplicates) {
+          const sig = (ls: { goodsItemId: number; quantity: any }[]) => ls.map((l) => `${l.goodsItemId}:${Number(l.quantity)}`).sort().join("|");
+          const existing = await prisma.storeSale.findMany({ where: { shiftId: shift.id, date: new Date(`${date}T00:00:00.000Z`) }, include: { lines: { select: { goodsItemId: true, quantity: true } } } });
+          const want = sig(lines);
+          const dup = existing.find((s) => sig(s.lines) === want);
+          if (dup) return { ok: false, error: `فروشی با همین شیفت، تاریخ و اقلام از قبل ثبت شده است (شماره ${dup.number})` };
+        }
+
+        const allowPriceChange = ctx.userId ? await userHasAction(ctx.userId, `${findFormPrefix("store-sales")}.changePrice`) : false;
+        await runWithRequestContext({ userId: ctx.userId ?? undefined }, () =>
+          createStoreSale({ date, shiftId: shift.id, shiftDate, customerId, description: first.description || undefined, lines }, allowPriceChange)
+        );
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت فروش" };
       }
     },
   });

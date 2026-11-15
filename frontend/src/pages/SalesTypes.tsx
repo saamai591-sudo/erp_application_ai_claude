@@ -18,7 +18,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 export type SalesNature = "DOMESTIC" | "EXPORT";
 
-export const SALES_NATURE_FA: Record<SalesNature, string> = {
+const SALES_NATURE_FA: Record<SalesNature, string> = {
   DOMESTIC: "داخلی",
   EXPORT: "صادراتی",
 };
@@ -45,7 +45,6 @@ function SalesTypeList() {
   const cacheKey = "/sales-types";
   const [items, setItems] = usePersistedState<SalesType[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/sales-types").then(setItems).catch((e) => setError(e.message));

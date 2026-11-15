@@ -33,6 +33,8 @@ import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
 import { useTabs } from "../lib/TabsContext";
 import { usePermissions } from "../lib/usePermissions";
 import { CloseFollowUpDialog, FOLLOWUP_FA, FollowUpBanner, useQuoteFollowUp } from "../components/QuoteFollowUp";
+import { CheckIcon, UndoIcon, PlusIcon, MacroIcon } from "../components/icons";
+import { partyTitleOf } from "../lib/partyDisplay";
 
 // «پیش‌فاکتور» — بالاترین سند زنجیره فروش (پیش‌فاکتور > سفارش فروش > حواله فروش > فاکتور فروش)؛ این
 // ماژول هیچ مستند تحلیل اختصاصی در پروژه ندارد (رجوع کنید به یادداشت بالای schema.prisma و
@@ -47,11 +49,6 @@ type Status = "DRAFT" | "APPROVED";
 interface CustomerOption { id: number; code: number; partyId?: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
-
-function customerTitle(c: CustomerOption): string {
-  if (c.party.detailTitle) return c.party.detailTitle;
-  return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
-}
 
 interface ListRow { followUpState?: string | null; followUpReasonTitle?: string | null; closedRemainingAmount?: number | null; id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; listPrice?: number | null }
@@ -70,17 +67,6 @@ export default function SalesQuotes() {
   return <SalesQuoteList />;
 }
 
-function CheckIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 function CloseCircleIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -89,15 +75,10 @@ function CloseCircleIcon() {
     </svg>
   );
 }
-function PlusIcon() {
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
-}
-
 function SalesQuoteList() {
   const cacheKey = "/sales-quotes";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     try {
@@ -210,14 +191,6 @@ function DuplicateIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
       <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="2" />
       <path d="M5 15V6a2 2 0 012-2h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function MacroIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -662,12 +635,12 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
                 title="انتخاب مشتری"
                 displayValue={(() => {
                   const c = customers.find((x) => String(x.id) === header.customerId);
-                  return c ? `${toFaDigits(String(c.code))} — ${customerTitle(c)}` : "";
+                  return c ? `${toFaDigits(String(c.code))} — ${partyTitleOf(c)}` : "";
                 })()}
                 rows={customers}
                 columns={[
                   { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                  { header: "عنوان", render: (x) => customerTitle(x), filterValue: (x) => customerTitle(x) },
+                  { header: "عنوان", render: (x) => partyTitleOf(x), filterValue: (x) => partyTitleOf(x) },
                 ]}
                 onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
               />

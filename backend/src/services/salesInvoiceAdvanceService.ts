@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { RECEIPT_DOC_INCLUDE, receiptLineDoc, effectiveReceiptLine } from "./settlementDocRef";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // تخصیص پیش‌دریافت به فاکتور فروش — طبق Documents/تخصیص پیش دریافت.md و Documents/تغییرات تخصیص پیش‌دریافت.md.
@@ -14,7 +15,7 @@ import { RECEIPT_DOC_INCLUDE, receiptLineDoc, effectiveReceiptLine } from "./set
 const TOLERANCE = 0.005;
 
 export type AdvanceNature = "ADVANCE_RECEIPT" | "ADVANCE_VAT_RECEIPT";
-export const ADVANCE_NATURES: AdvanceNature[] = ["ADVANCE_RECEIPT", "ADVANCE_VAT_RECEIPT"];
+const ADVANCE_NATURES: AdvanceNature[] = ["ADVANCE_RECEIPT", "ADVANCE_VAT_RECEIPT"];
 const NATURE_FA: Record<AdvanceNature, string> = { ADVANCE_RECEIPT: "پیش‌دریافت", ADVANCE_VAT_RECEIPT: "پیش‌دریافت ارزش افزوده" };
 
 // -------------------------------------------------------------------------
@@ -94,10 +95,6 @@ async function loadInvoice(invoiceId: number) {
   return invoice;
 }
 
-function partyName(p: any): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 // پیش‌دریافت‌های قابل نمایش برای یک فاکتور (شرایط بند ۳ مستند): طرف حساب یکسان، نوع دریافت «پیش‌دریافت»، رسید تاییدشده، تاریخ دریافت ≤ تاریخ فاکتور،
 // ارز یکسان و مبلغ قابل تخصیص > صفر (ردیف‌هایی که همین فاکتور از آن‌ها تخصیص گرفته هم برای ویرایش نمایش داده می‌شوند).
 export async function getSalesInvoiceAdvanceState(invoiceId: number) {
@@ -150,7 +147,7 @@ export async function getSalesInvoiceAdvanceState(invoiceId: number) {
       id: invoice.id,
       number: invoice.number,
       date: invoice.date,
-      customerTitle: partyName(invoice.customer.party),
+      customerTitle: partyTitle(invoice.customer.party),
       currencyTitle: invoice.currency.title,
       total,
       vatTotal,

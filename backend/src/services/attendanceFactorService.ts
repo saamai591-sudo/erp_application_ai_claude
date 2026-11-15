@@ -57,7 +57,7 @@ export function factorShape(f: any) {
 }
 
 /** عامل‌هایی که متنِ یکی از شاخه‌های روش‌هایشان به این عامل ارجاع می‌دهد */
-export async function factorsReferencing(key: string): Promise<string[]> {
+async function factorsReferencing(key: string): Promise<string[]> {
   const re = new RegExp(`\\[(F|A|M):${key}(:[A-Za-z_]+)?\\]`, "i");
   return formulaUsers(re, key);
 }

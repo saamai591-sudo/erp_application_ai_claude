@@ -39,7 +39,7 @@ export function setWarehouseReviewSnapshot(mode: string, snapshot: WarehouseRevi
   storeOf(mode).set(snapshot);
 }
 
-export function clearWarehouseReviewSnapshot(mode: string) {
+function clearWarehouseReviewSnapshot(mode: string) {
   storeOf(mode).clearAll();
 }
 

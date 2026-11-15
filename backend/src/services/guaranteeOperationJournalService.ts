@@ -3,6 +3,7 @@ import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { findIssuingDocType } from "./documentTypeService";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
+import { getBaseCurrency } from "./baseCurrencyService";
 
 // سند حسابداری «عملیات ضمانت‌نامه دریافتی/پرداختی»: همان معین‌ها و تفصیل‌های ردیف‌های حسابداریِ ذخیره‌شده‌ی سند دریافت/پرداخت اصلی (GuaranteeAccountingLine)
 // افزایش = هم‌جهت با سند اصلی؛ تقلیل و ابطال = معکوس سند اصلی. مبلغ = مبلغ تغییر (در ابطال: مبلغ فعلی) به ارز پایه با نرخ ابزار.
@@ -24,8 +25,7 @@ export async function issueGuaranteeOperationJournal(id: number) {
   if (!op) throw new Error("سند عملیات یافت نشد");
   if (op.journalEntryId) throw new Error("قبلاً برای این سند عملیات، سند حسابداری صادر شده است");
   if (op.lines.length === 0) throw new Error("سند عملیات بدون ضمانت‌نامه سند حسابداری ندارد");
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
   const word = op.direction === "RECEIPT" ? "دریافت" : "پرداخت";
   const action = KIND_FA[op.kind];
   const description = `بابت ${action} ضمانت‌نامه ${word}ی شماره ${op.number} ${formatJalaliDateForMessage(op.date)} ${op.party.detailTitle ?? ""}`.trim();

@@ -78,7 +78,7 @@ export interface PartyInput {
 }
 
 /** حروف عربی→فارسی، فاصله‌های اضافه حذف؛ عنوان تفصیل همیشه به همین شکل نرمال ذخیره و مقایسه می‌شود */
-export function normalizeTitle(s: string | null | undefined): string {
+function normalizeTitle(s: string | null | undefined): string {
   return String(s ?? "")
     .replace(/ي/g, "ی")
     .replace(/ك/g, "ک")
@@ -86,7 +86,7 @@ export function normalizeTitle(s: string | null | undefined): string {
     .trim();
 }
 
-export function defaultDetailTitle(p: { category?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null }): string {
+function defaultDetailTitle(p: { category?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null }): string {
   return normalizeTitle(p.category === "INDIVIDUAL" ? `${p.firstName ?? ""} ${p.lastName ?? ""}` : p.name);
 }
 

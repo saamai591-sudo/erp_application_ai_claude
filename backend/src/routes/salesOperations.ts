@@ -1,8 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { nextSerialNumber } from "../utils/coding";
-import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate } from "../services/accountingSettingsService";
@@ -15,6 +13,7 @@ import { assertPartyGroup } from "./partyGroups";
 import { followUpStateOf, quoteRemainders } from "../services/salesQuoteFollowUpService";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
 import { getRequestContext } from "../lib/requestContext";
+import { partyTitle } from "../utils/partyTitle";
 
 const CUSTOMERS_FORM = findFormPrefix("customers");
 const SALES_QUOTES_FORM = findFormPrefix("sales-quotes");
@@ -35,21 +34,9 @@ const SALES_ORDERS_FORM = findFormPrefix("sales-orders");
 
 const router = Router();
 
-async function resolveFiscalPeriod(date: Date) {
-  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
-  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
-  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
-  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
-  return fiscalPeriod;
-}
-
 async function nextNumber(model: { findFirst: (args: any) => Promise<any> }, fiscalPeriodId: number) {
   const last = await model.findFirst({ where: { fiscalPeriodId }, orderBy: { number: "desc" } });
   return last ? last.number + 1 : 1;
-}
-
-function partyDisplayName(party: any) {
-  return party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim();
 }
 
 // =========================================================================
@@ -249,7 +236,7 @@ router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) 
       number: d.number,
       date: d.date,
       customerId: d.customerId,
-      customerTitle: partyDisplayName(d.customer.party),
+      customerTitle: partyTitle(d.customer.party),
       salesTypeId: d.salesTypeId,
       salesTypeTitle: d.salesType.title,
       salesCenterId: d.salesCenterId,
@@ -285,7 +272,7 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
     number: d.number,
     date: d.date,
     customerId: d.customerId,
-    customerTitle: partyDisplayName(d.customer.party),
+    customerTitle: partyTitle(d.customer.party),
     salesTypeId: d.salesTypeId,
     salesTypeTitle: d.salesType.title,
     salesCenterId: d.salesCenterId,
@@ -324,7 +311,7 @@ export async function createSalesQuote(body: SalesQuoteHeaderBody, forcedNumber?
   }
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
     const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
@@ -380,7 +367,7 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این پیش‌فاکتور");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
     const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
@@ -675,7 +662,7 @@ router.get("/sales-orders", can(`${SALES_ORDERS_FORM}.view`), async (_req, res) 
       date: d.date,
       basis: d.basis,
       customerId: d.customerId,
-      customerTitle: partyDisplayName(d.customer.party),
+      customerTitle: partyTitle(d.customer.party),
       salesTypeId: d.salesTypeId,
       salesTypeTitle: d.salesType.title,
       salesCenterId: d.salesCenterId,
@@ -708,7 +695,7 @@ router.get("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.view`), async (req, re
     date: d.date,
     basis: d.basis,
     customerId: d.customerId,
-    customerTitle: partyDisplayName(d.customer.party),
+    customerTitle: partyTitle(d.customer.party),
     salesTypeId: d.salesTypeId,
     salesTypeTitle: d.salesType.title,
     salesCenterId: d.salesCenterId,
@@ -743,7 +730,7 @@ router.post("/sales-orders", can(`${SALES_ORDERS_FORM}.create`), async (req, res
   }
   try {
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
     const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
@@ -789,7 +776,7 @@ router.put("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.edit`), async (req, re
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سفارش فروش");
     const date = new Date(body.date);
-    const fiscalPeriod = await resolveFiscalPeriod(date);
+    const fiscalPeriod = await resolveDocumentFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
     const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });

@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
-import { AssetError } from "./assetError";
+import { AssetError, assetBulkFail } from "./assetError";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
@@ -23,12 +23,6 @@ const D = (v: any) => new Prisma.Decimal(v ?? 0);
 const fail = (m: string): never => {
   throw new AssetError(m);
 };
-function bulkFail(summary: string, details: Record<string, unknown>[]): never {
-  const err = new AssetError(summary);
-  err.details = details;
-  throw err;
-}
-
 /** حساب مقابلِ ارزش دفتری به‌ازای ماهیت نوع خروج */
 const LOSS_ACCOUNT: Record<string, { type: string; title: string }> = {
   SALE: { type: "SALE_GAIN_LOSS", title: "سود و زیان ناشی از فروش دارایی" },
@@ -126,7 +120,7 @@ export async function saveExit(id: number | null, body: Body) {
     if (ex!.status !== "DRAFT") fail("سند خروج تاییدشده قابل ویرایش نیست؛ ابتدا تایید آن را برگردانید");
   }
   const { problems, groups } = await checkItems(date, assetIds, id);
-  if (problems.length) bulkFail("ذخیره‌ی سند خروج انجام نشد", problems);
+  if (problems.length) assetBulkFail("ذخیره‌ی سند خروج انجام نشد", problems);
   const fp = await getCurrentFiscalPeriod();
   if (!fp) return fail("دوره مالی تعریف نشده است");
   const description = body.description?.toString().trim() || null;
@@ -159,7 +153,7 @@ export async function confirmExit(id: number, userId: number | null) {
   const dec = baseCurrency?.decimalPlaces ?? 0;
   await loadType(ex.typeId);
   const { problems, groups } = await checkItems(ex.date, ex.items.map((i) => i.assetId), id);
-  if (problems.length) bulkFail("تایید سند خروج انجام نشد", problems);
+  if (problems.length) assetBulkFail("تایید سند خروج انجام نشد", problems);
   const fp = await getCurrentFiscalPeriod();
   const calcEnd = await lastCalculatedEnd();
 
@@ -247,7 +241,7 @@ export async function issueExitEntry(id: number) {
 
   // خالص هر (معین + تفصیل‌ها): مثبت = بدهکار، منفی = بستانکار
   const net = new Map<string, { accountId: number; d: [string | null, string | null, string | null]; amount: Prisma.Decimal }>();
-  const post = (a: any, ctx: { plaque: string; costCenter: string | null; project: string | null; party?: string | null }, label: string, signed: Prisma.Decimal, plaqueTitle: string) => {
+  const post = (a: any, ctx: { costCenter: string | null; project: string | null; party?: string | null }, label: string, signed: Prisma.Decimal, plaqueTitle: string) => {
     if (!a || signed.isZero()) return;
     const r = fillAssetDetails(a.account, ctx, label);
     if (r.error) {
@@ -263,7 +257,7 @@ export async function issueExitEntry(id: number) {
   for (const it of ex.items) {
     const a = it.asset;
     const pos = [...a.positions].reverse().find((p) => day(p.fromDate) <= day(ex.date)) ?? a.positions[0];
-    const ctx = { plaque: a.detailCode, costCenter: pos?.costCenter.detailCode ?? null, project: pos?.project?.detailCode ?? null };
+    const ctx = { costCenter: pos?.costCenter.detailCode ?? null, project: pos?.project?.detailCode ?? null };
     const cost = D(it.costAtExit);
     const acc = D(it.accumulatedAtExit);
     const bookValue = cost.sub(acc);
@@ -272,19 +266,19 @@ export async function issueExitEntry(id: number) {
     post(accAcct, ctx, "خروج استهلاک انباشته", acc, a.detailCode);
     // استهلاک تا روز خروج: بدهکار هزینه / بستانکار استهلاک انباشته (به‌ازای موقعیتِ هر رکورد)
     for (const s of it.depreciationItems) {
-      const sctx = { plaque: a.detailCode, costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null };
+      const sctx = { costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null };
       post(await acct(it.groupId, "DEPRECIATION_EXPENSE"), sctx, "هزینه استهلاک تا روز خروج", D(s.amount), a.detailCode);
       post(accAcct, sctx, "استهلاک انباشته تا روز خروج", D(s.amount).neg(), a.detailCode);
     }
     // هزینه‌ی بیمه تا روز خروج: بدهکار هزینه بیمه / بستانکار پیش‌پرداخت بیمه
     for (const s of it.insuranceItems) {
-      const sctx = { plaque: a.detailCode, costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null, party: insurerCodeOf(s) };
+      const sctx = { costCenter: s.position.costCenter.detailCode, project: s.position.project?.detailCode ?? null, party: insurerCodeOf(s) };
       post(await acct(it.groupId, "INSURANCE_EXPENSE", insuranceTypeOf(s)), sctx, "هزینه بیمه تا روز خروج", D(s.amount), a.detailCode);
       post(await acct(it.groupId, "PREPAID_INSURANCE", insuranceTypeOf(s)), sctx, "پیش‌پرداخت بیمه تا روز خروج", D(s.amount).neg(), a.detailCode);
     }
     if (bookValue.gt(0)) post(await acct(it.groupId, loss.type), ctx, `ارزش دفتری خروج (${loss.title})`, bookValue, a.detailCode);
   }
-  if (problems.length) bulkFail("صدور سند خروج دارایی انجام نشد", problems);
+  if (problems.length) assetBulkFail("صدور سند خروج دارایی انجام نشد", problems);
 
   const description = `بابت خروج دارایی ثابت شماره ${ex.number} (${ex.type.title}) ${formatJalaliDateForMessage(ex.date)}`;
   const lines: IssueLineInput[] = [];

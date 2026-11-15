@@ -2,8 +2,10 @@ import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
-import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { EffectiveTreasurySettings } from "./treasurySettingService";
 import { findIssuingDocType } from "./documentTypeService";
+import { getBaseCurrency } from "./baseCurrencyService";
+import { partyTitle } from "../utils/partyTitle";
 
 // =========================================================================
 // صدور سند حسابداری «وصول و برگشت چک پرداختنی» (ChequeClearingPayable) — اکشن دستی روی سند تاییدشده (هم‌الگوی وصول و برگشت
@@ -19,10 +21,6 @@ import { findIssuingDocType } from "./documentTypeService";
 // چک همیشه با ارز پایه است، پس همه‌ی ردیف‌ها به ارز پایه ثبت می‌شوند. کارمزد بانکی این سند لحاظ نمی‌شود.
 // =========================================================================
 
-function partyDisplayName(p: any): string {
-  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
-}
-
 export async function issueChequeClearingPayableJournalEntry(clearingId: number) {
   const doc = await prisma.chequeClearingPayable.findUnique({
     where: { id: clearingId },
@@ -33,8 +31,7 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
   if (doc.status !== "APPROVED") throw new Error("فقط برای سندِ «تایید»شده می‌توان سند حسابداری صادر کرد");
   if (doc.lines.length === 0) throw new Error("سند چکی ندارد");
 
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+  const baseCurrency = await getBaseCurrency();
 
   const treasurySettings = new EffectiveTreasurySettings(await prisma.treasuryAccountSetting.findMany({ include: { account: true } }) as any[]);
   const description = `بابت وصول و برگشت چک پرداختنی ${doc.number} ${formatJalaliDateForMessage(doc.date)}`.trim();
@@ -56,7 +53,7 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
     const n = idx + 1;
     const cheque = l.chequeItem;
     const amount = Number(cheque.amount);
-    const partyName = partyDisplayName(cheque.party);
+    const partyName = partyTitle(cheque.party);
 
     // ---------- بدهکار: چک پرداختی ----------
     if (!cheque.payableChequeTypeId) {

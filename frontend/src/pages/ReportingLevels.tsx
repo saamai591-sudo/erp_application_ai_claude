@@ -29,7 +29,6 @@ function LevelList() {
   const cacheKey = "/reporting-levels";
   const [items, setItems] = usePersistedState<Level[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
     api.get("/reporting-levels").then(setItems).catch((e) => setError(e.message));

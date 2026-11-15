@@ -4,6 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { nextSerialNumber } from "../utils/coding";
 import { BENEFICIARY_TYPES, BENEFICIARY_TYPE_FA, BeneficiaryType, branchLabel } from "../services/beneficiaryService";
+import { collapseOrNull } from "../utils/inputParse";
 
 // منابع انسانی › تنظیمات › «سازمان ذینفع» و «شعب سازمان ذینفع». قواعد مشترک: services/beneficiaryService.ts.
 
@@ -17,8 +18,6 @@ function fail(res: any, e: any, fallback: string) {
   if (e?.code === "P2002") return res.status(400).json({ error: "رکورد تکراری است" });
   return res.status(400).json({ error: e?.message || fallback });
 }
-const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ") : null);
-
 // ── سازمان ذینفع ──
 
 const shapeOrg = (o: any) => ({ id: o.id, code: o.code, title: o.title, type: o.type, typeTitle: BENEFICIARY_TYPE_FA[o.type as BeneficiaryType], isActive: o.isActive, branchCount: o._count?.branches ?? 0 });
@@ -54,7 +53,7 @@ router.get("/beneficiary-orgs/:id", can(`${F_ORG}.view`), async (req, res) => {
 });
 
 async function orgData(b: any, id: number | null) {
-  const title = str(b.title);
+  const title = collapseOrNull(b.title);
   if (!title) throw new BErr("عنوان الزامی است");
   if (await prisma.beneficiaryOrg.findFirst({ where: { title, ...(id ? { NOT: { id } } : {}) } })) throw new BErr("سازمان ذینفع دیگری با همین عنوان وجود دارد");
   if (!BENEFICIARY_TYPES.includes(b.type)) throw new BErr("نوع سازمان را انتخاب کنید");
@@ -163,12 +162,12 @@ async function branchData(b: any, existing: { id: number; organizationId: number
   if (!party) throw new BErr("شعبه را (از اشخاص حقوقی) انتخاب کنید");
   if (party.category !== "LEGAL") throw new BErr("شعبه باید شخص حقوقی باشد");
   const social = org.type === "SOCIAL_SECURITY";
-  const fileNumber = str(b.fileNumber);
+  const fileNumber = collapseOrNull(b.fileNumber);
   if (!fileNumber) throw new BErr(social ? "کد کارگاه الزامی است" : "شماره پرونده الزامی است");
   // فیلدهای ویژه‌ی تامین اجتماعی: ردیف پیمان (اختیاری)، کارفرما و آدرس (الزامی)؛ برای سایر سازمان‌ها نگه‌داشته نمی‌شوند
-  const contractRow = social ? str(b.contractRow) ?? "" : "";
-  const employer = social ? str(b.employer) : null;
-  const address = social ? str(b.address) : null;
+  const contractRow = social ? collapseOrNull(b.contractRow) ?? "" : "";
+  const employer = social ? collapseOrNull(b.employer) : null;
+  const address = social ? collapseOrNull(b.address) : null;
   if (social && !employer) throw new BErr("کارفرما الزامی است");
   if (social && !address) throw new BErr("آدرس الزامی است");
   return { organizationId: org.id, partyId: party.id, fileNumber, contractRow, employer, address, isActive: b.isActive === undefined ? true : !!b.isActive };

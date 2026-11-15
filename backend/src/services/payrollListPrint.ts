@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { wrapPrintHtml } from "./printService";
+import { money, valueText } from "./payrollPrintCommon";
 
 // چاپ «لیست حقوق» یک ماه (نمونه‌ها: `Documents/لیست حقوق.pdf` و `Documents/لیست حقوق 2.pdf`): A4 افقی.
 // طبقات (مشخصات کارمند | کارکرد | مزایا | کسور | هزینه کارفرما | سایر) همیشه در یک سطرِ عنوان کنار هم‌اند و هیچ طبقه‌ای به خط بعد نمی‌رود؛
@@ -12,19 +13,6 @@ import { wrapPrintHtml } from "./printService";
 
 const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const money = (v: number) => Math.round(v).toLocaleString("en-US");
-const hhmm = (hours: number) => {
-  let h = Math.floor(hours + 1e-9);
-  let m = Math.round((hours - h) * 60);
-  if (m === 60) { h += 1; m = 0; }
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-};
-function valueText(amount: number, valueType: string | undefined): string {
-  if (valueType === "TIME") return hhmm(amount);
-  if (valueType === "DAYS" || valueType === "NUMBER") return String(Math.round(amount * 100) / 100);
-  return money(amount);
-}
-
 type Sec = "INFO" | "WORK" | "EARNING" | "DEDUCTION" | "EMPLOYER_COST" | "OTHER";
 const SEC_TITLE: Record<Sec, string> = { INFO: "مشخصات کارمند", WORK: "کارکرد", EARNING: "مزایا", DEDUCTION: "کسور", EMPLOYER_COST: "هزینه کارفرما", OTHER: "سایر" };
 const SEC_ORDER: Sec[] = ["INFO", "WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "OTHER"];
