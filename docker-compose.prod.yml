@@ -55,7 +55,8 @@ services:
       # پشتیبان‌های خودکار (سیاست از صفحه‌ی /management)؛ volume جدا تا با ساخت دوباره‌ی کانتینر پاک نشوند
       - backups:/backups
     ports:
-      - "4000:4000"
+      # پورت روی میزبان؛ وقتی برنامه‌ی دیگری روی همان سرور پورت ۴۰۰۰ را گرفته BACKEND_PORT را در .env عوض کنید
+      - "${BACKEND_PORT:-4000}:4000"
 
   frontend:
     image: ${ERP_REGISTRY:-reg.greenbits.ir}/accounting-erp-frontend:${ERP_VERSION:-latest}
@@ -69,7 +70,7 @@ services:
       # پشت پراکسی با یک دامنه (HTTPS) /api بگذارید و پراکسی مسیر /api را به backend:4000 بفرستد؛ خالی = http://<hostname>:4000/api
       VITE_API_URL: ${VITE_API_URL:-}
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
 
   # سرویس به‌روزرسانی (تنها بخشی که به docker دسترسی دارد). پورتش به بیرون باز نیست؛ فقط backend با UPDATER_TOKEN با آن حرف می‌زند.
   # روی ویندوز (Docker Desktop با کانتینر لینوکس) همین docker.sock داخل ماشین مجازی لینوکس هم کار می‌کند.
