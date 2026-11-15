@@ -924,6 +924,7 @@ export default function App() {
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />
+            <Route path="/sales-quotes/:id/amend" element={<SalesQuotes />} />
             <Route path="/sales-orders" element={<SalesOrders />} />
             <Route path="/sales-orders/new" element={<SalesOrders />} />
             <Route path="/sales-orders/:id/edit" element={<SalesOrders />} />

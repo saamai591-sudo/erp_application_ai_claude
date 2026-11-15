@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
-import { showError } from "../lib/toast";
+import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -12,6 +12,7 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { DownstreamMenu } from "../components/DownstreamMenu";
 import { PrintButton } from "../components/PrintButton";
+import { QuoteRevisionsDialog } from "../components/QuoteRevisionsDialog";
 import { PartyContactButton } from "../components/PartyContactButton";
 import { QUOTE_DOWNSTREAM_ACTIONS } from "../components/DownstreamDialogs";
 import { InfoHint } from "../components/InfoHint";
@@ -19,7 +20,7 @@ import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
-import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { api, ApiError } from "../lib/api";
 import { SalesType } from "./SalesTypes";
@@ -51,9 +52,9 @@ type Status = "DRAFT" | "APPROVED";
 interface CustomerOption { id: number; code: number; partyId?: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
 
-interface ListRow { followUpState?: string | null; followUpReasonTitle?: string | null; closedRemainingAmount?: number | null; id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
-interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; listPrice?: number | null }
-interface Detail extends ListRow { currencyId: number; description: string | null; validUntil?: string | null; lines: DetailLine[] }
+interface ListRow { amendmentNumber?: number; followUpState?: string | null; followUpReasonTitle?: string | null; closedRemainingAmount?: number | null; id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
+interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; listPrice?: number | null; lockedBy?: string[] }
+interface Detail extends ListRow { currencyId: number; description: string | null; validUntil?: string | null; updatedAt?: string; followUpClosed?: boolean; lines: DetailLine[] }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
 const INFO_TEXT = "ثبت پیش‌فاکتور/استعلام قیمت برای مشتری — بالاترین سند زنجیره فروش. پس از تایید، می‌توان از آن سفارش فروش ایجاد کرد.";
@@ -63,11 +64,31 @@ export default function SalesQuotes() {
   const { id } = useParams();
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
+  const isAmend = location.pathname.endsWith("/amend");
+  if (isAmend) return <SalesQuoteForm editId={Number(id)} amend />;
   if (isNew) return <SalesQuoteForm />;
   if (isEdit) return <SalesQuoteForm editId={Number(id)} />;
   return <SalesQuoteList />;
 }
 
+function AmendIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M4 20h4L19 9a2.1 2.1 0 000-3l-1-1a2.1 2.1 0 00-3 0L4 16v4z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M13.5 6.5l4 4" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+function HistoryButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="toolbar-icon-btn" onClick={onClick} title="اصلاحیه‌های این پیش‌فاکتور (تاریخچه و نسخه‌های قبلی)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+        <path d="M4 12a8 8 0 108-8 8 8 0 00-6 2.7L4 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M4 4v5h5M12 8v4l3 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  );
+}
 function CloseCircleIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -143,6 +164,7 @@ function SalesQuoteList() {
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
           { header: "مبلغ کل (پس از تخفیف)", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          { header: "اصلاحیه", render: (r) => (r.amendmentNumber ? toFaDigits(String(r.amendmentNumber)) : "—"), width: "80px", filterType: "number", filterValue: (r) => r.amendmentNumber ?? 0 },
           { header: "وضعیت پیگیری", render: (r) => (r.followUpState ? FOLLOWUP_FA[r.followUpState] : "—"), filterType: "string", filterValue: (r) => (r.followUpState ? FOLLOWUP_FA[r.followUpState] : ""), width: "150px" },
           { header: "دلیل فروش‌نشدن", render: (r) => r.followUpReasonTitle || "—", filterType: "string", filterValue: (r) => r.followUpReasonTitle || "" },
           { header: "مبلغ بسته‌شده", render: (r) => (r.closedRemainingAmount ? formatAmountFa(r.closedRemainingAmount) : "—"), filterType: "number", filterValue: (r) => r.closedRemainingAmount ?? 0, decimal: true },
@@ -157,7 +179,7 @@ function SalesQuoteList() {
 }
 
 /** listPrice = قیمتی که سیستم (اعلامیه قیمت) برای مقدار ردیف پیشنهاد داده؛ unitPrice فی نهایی است و کاربر می‌تواند عوضش کند */
-interface RowState { goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string; listPrice: string }
+interface RowState { /** شناسه‌ی ردیف ذخیره‌شده (فقط در اصلاحیه) */ id?: string; /** گردش ردیفی (سفارش/حواله/فاکتور/بسته‌شده): ردیف در اصلاحیه قفل است */ lockedBy?: string[]; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string; listPrice: string }
 
 /** فی پایه و پله‌های یک کالا از اعلامیه‌ی مؤثر (GET /sales-price-lists/resolve) */
 interface PriceInfo { basePrice: number; tiers: { minQuantity: number; effect: string; value: number; price: number }[] }
@@ -200,7 +222,7 @@ function emptyRow(): RowState {
   return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "", listPrice: "" };
 }
 
-function SalesQuoteForm({ editId }: { editId?: number }) {
+function SalesQuoteForm({ editId, amend }: { editId?: number; /** اصلاح پیش‌فاکتورِ تاییدشده: سرصفحه قفل، فقط ردیف‌های بدون گردش قابل تغییرند، ثبت با دلیل و شماره‌ی اصلاحیه */ amend?: boolean }) {
   const vatRates = useVatRates();
   const navigate = useNavigate();
   const location = useLocation();
@@ -212,13 +234,15 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "", validUntil: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   useGoodsCatalog(rows.map((r) => r.goodsItemId));
-  const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: Status; amendmentNumber?: number; updatedAt?: string; followUpClosed?: boolean } | null>(`${cacheKey}:meta`, null);
+  const [reason, setReason] = usePersistedState(`${cacheKey}:reason`, "");
+  const [revisionsDialog, setRevisionsDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   useDefaultBaseCurrency({ enabled: !editId && loaded, currencies, current: header.currencyId, apply: (id) => setHeader((h) => ({ ...h, currencyId: id })) });
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { flash } = useSavedFlash();
-  const { openTab } = useTabs();
+  const { openTab, closeTab, tabs, activeTabId } = useTabs();
   const { hasPermission } = usePermissions();
   const [followUpDialog, setFollowUpDialog] = useState(false);
   const followUp = useQuoteFollowUp(editId, !!editId);
@@ -245,10 +269,12 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       }
       if (editId) {
         const d: Detail = await api.get(`/sales-quotes/${editId}`);
-        setMeta({ number: d.number, status: d.status });
+        setMeta({ number: d.number, status: d.status, amendmentNumber: d.amendmentNumber ?? 0, updatedAt: d.updatedAt, followUpClosed: !!d.followUpClosed });
         setHeader({ date: d.date.slice(0, 10), customerId: String(d.customerId), salesTypeId: String(d.salesTypeId), salesCenterId: String(d.salesCenterId), currencyId: String(d.currencyId), description: d.description || "", validUntil: d.validUntil ? String(d.validUntil).slice(0, 10) : "" });
         setRows(
           d.lines.map((l) => ({
+            id: String(l.id),
+            lockedBy: l.lockedBy ?? [],
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
             goodsItemTitle: l.goodsItemTitle,
@@ -341,7 +367,11 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
 
   const status: Status = meta?.status || "DRAFT";
   // پیش‌فاکتور بسته‌شده (حتی در حالت ثبت) قابل ویرایش/تایید نیست تا پیگیری بازگشایی شود
-  const locked = status !== "DRAFT" || followUpClosed;
+  const amendBlocked = !!amend && (status !== "APPROVED" || followUpClosed || !!meta?.followUpClosed);
+  const locked = amend ? false : status !== "DRAFT" || followUpClosed;
+  // در اصلاحیه سرصفحه همیشه قفل است و فقط ردیف‌های بدون گردش آزادند
+  const headerLocked = !!amend || locked;
+  const rowLocked = (row: RowState) => locked || amendBlocked || (!!amend && (row.lockedBy?.length ?? 0) > 0);
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -494,6 +524,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       description: header.description,
       validUntil: header.validUntil || null,
       lines: nonEmptyRows.map((r) => ({
+        ...(r.id ? { id: Number(r.id) } : {}),
         goodsItemId: Number(r.goodsItemId),
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -506,9 +537,34 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     };
   }
 
+  async function onAmend() {
+    if (!editId) return;
+    if (amendBlocked) return setError("اصلاحیه فقط برای پیش‌فاکتور تاییدشده (و بدون بستن پیگیری) ممکن است");
+    if (!reason.trim()) return setError("دلیل اصلاحیه را وارد کنید");
+    const body = buildBody();
+    if (body.lines.length === 0) return setError("پیش‌فاکتور باید حداقل یک ردیف کالا داشته باشد");
+    for (const [i, l] of body.lines.entries()) {
+      if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
+    }
+    try {
+      const r = await api.post(`/sales-quotes/${editId}/amend`, { reason: reason.trim(), updatedAt: meta?.updatedAt, lines: body.lines });
+      flash(`اصلاحیه ${toFaDigits(String(r.amendmentNumber))} ثبت شد`);
+      if (r.warning) showToast(r.warning, "error");
+      // فرم «ویرایش» همین پیش‌فاکتور (اگر باز است) کهنه شده؛ حالتش پاک می‌شود تا از سرور دوباره بخواند
+      const editPath = `/sales-quotes/${editId}/edit`;
+      clearPersistedStateFamily(`form:${editPath}`);
+      clearPersistedStateFamily(`form:${location.pathname}`);
+      if (tabs.some((t) => t.path === editPath) && activeTabId) closeTab(activeTabId, { preferPath: editPath });
+      else navigate(editPath);
+    } catch (err) {
+      setError((err as ApiError).message);
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (amend) return onAmend();
     if (!header.date || !header.customerId || !header.salesTypeId || !header.salesCenterId || !header.currencyId) return setError("تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است");
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
@@ -555,7 +611,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     try {
       await api.post(`/sales-quotes/${editId}/${path}`, {});
       const d: Detail = await api.get(`/sales-quotes/${editId}`);
-      setMeta({ number: d.number, status: d.status });
+      setMeta({ number: d.number, status: d.status, amendmentNumber: d.amendmentNumber ?? 0, updatedAt: d.updatedAt, followUpClosed: !!d.followUpClosed });
       flash();
     } catch (e) {
       showError((e as ApiError).message);
@@ -572,15 +628,23 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
 
   return (
     <FormPage
-      title={editId ? "ویرایش پیش‌فاکتور" : "پیش‌فاکتور جدید"}
+      title={amend ? `اصلاح پیش‌فاکتور ${meta ? toFaDigits(String(meta.number)) : ""}` : editId ? "ویرایش پیش‌فاکتور" : "پیش‌فاکتور جدید"}
       formId="sales-quote-form"
       closePath="/sales-quotes"
       newPath="/sales-quotes/new"
-      onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
-      saveDisabled={locked}
-      extraActions={extraActions}
-      toolbarExtra={editId ? (
+      onDelete={editId && !amend && status === "DRAFT" ? handleDelete : undefined}
+      saveDisabled={locked || amendBlocked}
+      extraActions={amend ? [] : extraActions}
+      toolbarExtra={editId && amend ? (
+        (meta?.amendmentNumber ?? 0) > 0 ? <HistoryButton onClick={() => setRevisionsDialog(true)} /> : undefined
+      ) : editId ? (
         <>
+          {status === "APPROVED" && !followUpClosed && hasPermission("sales.operations.sales-quotes.amend") && (
+            <button type="button" className="toolbar-icon-btn" onClick={() => openTab(`/sales-quotes/${editId}/amend`)} title="اصلاح پیش‌فاکتور (تغییر ردیف‌های بدون گردش بدون برگشت از تایید)">
+              <AmendIcon />
+            </button>
+          )}
+          {(meta?.amendmentNumber ?? 0) > 0 && <HistoryButton onClick={() => setRevisionsDialog(true)} />}
           <PrintButton docType="SALES_QUOTE" sourceId={editId} title="چاپ پیش‌فاکتور" />
           <PartyContactButton partyId={customers.find((x) => String(x.id) === header.customerId)?.partyId} />
           {hasPermission("sales.operations.sales-quotes.create") && (
@@ -612,7 +676,22 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       <form id="sales-quote-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <FollowUpBanner info={followUp.info} />
-        <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
+        {amend && (
+          <div className="card" style={{ padding: "8px 12px", marginBottom: 8, fontSize: 13, lineHeight: 1.9 }}>
+            {amendBlocked ? (
+              <b style={{ color: "var(--danger, #c0392b)" }}>اصلاحیه فقط برای پیش‌فاکتور تاییدشده و بدون بستن پیگیری ممکن است.</b>
+            ) : (
+              <>
+                <b>اصلاح پیش‌فاکتور تاییدشده{(meta?.amendmentNumber ?? 0) > 0 ? ` — آخرین اصلاحیه: ${toFaDigits(String(meta?.amendmentNumber))}` : ""}.</b> سرصفحه قابل تغییر نیست. ردیفی که گردش دارد (سفارش، حواله، فاکتور یا مقدار بسته‌شده) قفل است؛ بقیه‌ی ردیف‌ها قابل ویرایش و حذف‌اند و ردیف جدید هم می‌توانید اضافه کنید.
+              </>
+            )}
+            <div className="form-field" style={{ marginTop: 6, maxWidth: 700 }}>
+              <label>دلیل اصلاحیه<RequiredMark /></label>
+              <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} disabled={amendBlocked} placeholder="مثلاً مشتری کالای ردیف ۲ را عوض کرد" />
+            </div>
+          </div>
+        )}
+        <fieldset disabled={headerLocked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid cols-4" style={{ marginBottom: 6, maxWidth: 1250 }}>
             <div className="form-field hc1 hr1">
               <label>شماره</label>
@@ -624,7 +703,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
             </div>
             <div className="form-field hc2 hr1">
               <label>وضعیت</label>
-              <div><span className="badge">{STATUS_FA[status]}</span></div>
+              <div><span className="badge">{STATUS_FA[status]}</span>{(meta?.amendmentNumber ?? 0) > 0 && <span className="badge" style={{ marginInlineStart: 6 }}>اصلاحیه {toFaDigits(String(meta?.amendmentNumber))}</span>}</div>
             </div>
             <div className="form-field hc2 hr2">
               <label>تاریخ اعتبار <InfoHint text="اختیاری — تا این تاریخ پیش‌فاکتور معتبر است؛ در چاپ پیش‌فاکتور می‌آید. نباید قبل از تاریخ پیش‌فاکتور باشد." title="تاریخ اعتبار" /></label>
@@ -672,17 +751,17 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
             </div>
           </div>
+        </fieldset>
 
           <div className="je-lines-toolbar" style={{ marginBottom: 4 }}>
             <span className="je-lines-title">اقلام</span>
-            <button type="button" className="btn secondary" style={{ marginInlineStart: "auto", marginInlineEnd: 8, padding: "2px 10px", fontSize: 11.5, lineHeight: 1.4 }} onClick={recallPrices} disabled={locked} title="فی ردیف‌ها را دوباره از اعلامیه قیمت (برای مرکز، نوع فروش، ارز و تاریخ همین سند) فراخوانی می‌کند">
+            <button type="button" className="btn secondary" style={{ marginInlineStart: "auto", marginInlineEnd: 8, padding: "2px 10px", fontSize: 11.5, lineHeight: 1.4 }} onClick={recallPrices} disabled={locked || amendBlocked} title="فی ردیف‌ها را دوباره از اعلامیه قیمت (برای مرکز، نوع فروش، ارز و تاریخ همین سند) فراخوانی می‌کند">
               بازفراخوانی قیمت
             </button>
-            <button type="button" className="toolbar-icon-btn primary mobile-fab" style={{ padding: 3 }} onClick={addRow} title="ردیف جدید">
+            <button type="button" className="toolbar-icon-btn primary mobile-fab" style={{ padding: 3 }} onClick={addRow} title="ردیف جدید" disabled={locked || amendBlocked}>
               <PlusIcon />
             </button>
           </div>
-        </fieldset>
 
         <div className="grid-wrap je-lines-wrap">
           <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
@@ -705,18 +784,20 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               <tbody>
                 {rows.map((row, idx) => {
                   const item = cachedGoods(Number(row.goodsItemId));
+                  const rl = rowLocked(row);
+                  const lockTip = amend && (row.lockedBy?.length ?? 0) > 0 ? `گردش دارد (${row.lockedBy!.join("، ")}) و قابل تغییر نیست` : undefined;
                   return (
-                    <tr key={idx}>
+                    <tr key={row.id ?? idx} title={lockTip} style={lockTip ? { opacity: 0.7 } : undefined}>
                       <td data-label="ردیف" style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td data-label="کالا" style={{ minWidth: 200 }}>
-                        <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={locked} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
+                        <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={rl} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                       </td>
                       <td data-label="واحد" style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
                       <td data-label="مقدار" style={{ minWidth: 120 }}>
-                        <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal disabled={locked} />
+                        <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal disabled={rl} />
                       </td>
                       <td data-label="فی" style={{ minWidth: 120 }}>
-                        <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal disabled={locked} />
+                        <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal disabled={rl} />
                       </td>
                       <td
                         data-label="قیمت اعلامیه"
@@ -726,19 +807,19 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
                         {row.listPrice === "" ? "—" : formatAmountFa(row.listPrice)}
                       </td>
                       <td data-label="مبلغ" style={{ minWidth: 120 }}>
-                        <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={locked} />
+                        <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={rl} />
                       </td>
                       <td data-label="تخفیف" style={{ minWidth: 120 }}>
-                        <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" disabled={locked} />
+                        <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" disabled={rl} />
                       </td>
                       <td data-label="ارزش افزوده" style={{ minWidth: 120 }}>
-                        <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" disabled={locked} />
+                        <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" disabled={rl} />
                       </td>
                       <td data-label="شرح" style={{ minWidth: 140 }}>
-                        <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={locked} />
+                        <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={rl} />
                       </td>
                       <td data-label="" className="mc-actions">
-                        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={locked}>
+                        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={rl}>
                           حذف
                         </button>
                       </td>
@@ -754,6 +835,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
           </div>
         </div>
       </form>
+      {revisionsDialog && editId && <QuoteRevisionsDialog quoteId={editId} onClose={() => setRevisionsDialog(false)} />}
       {followUpDialog && editId && followUp.info && (
         <CloseFollowUpDialog
           quoteId={editId}

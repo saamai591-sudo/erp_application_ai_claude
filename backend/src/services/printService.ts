@@ -289,7 +289,7 @@ async function loadSalesQuote(id: number): Promise<PrintData> {
   });
   return {
     company: await loadCompany(),
-    doc: { number: d.number, date: formatJalaliDateForMessage(d.date), validUntil: d.validUntil ? formatJalaliDateForMessage(d.validUntil) : "", description: d.description ?? "", currency: d.currency.title, status: DOC_STATUS_FA[d.status] ?? d.status },
+    doc: { number: d.amendmentNumber > 0 ? `${d.number} - اصلاحیه ${d.amendmentNumber}` : d.number, amendmentNumber: d.amendmentNumber > 0 ? d.amendmentNumber : "", date: formatJalaliDateForMessage(d.date), validUntil: d.validUntil ? formatJalaliDateForMessage(d.validUntil) : "", description: d.description ?? "", currency: d.currency.title, status: DOC_STATUS_FA[d.status] ?? d.status },
     customer: {
       name: partyName(party),
       economicCode: party.economicCode ?? "",

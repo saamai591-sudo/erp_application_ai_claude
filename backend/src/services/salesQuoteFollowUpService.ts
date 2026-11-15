@@ -88,7 +88,7 @@ export function followUpStateOf(q: { status: string; followUpClosedAt: Date | nu
   return "OPEN";
 }
 
-async function lockQuote(tx: any, quoteId: number) {
+export async function lockQuote(tx: any, quoteId: number) {
   await tx.$queryRaw`SELECT "id" FROM "SalesQuote" WHERE "id" = ${quoteId} FOR UPDATE`;
   // ردیف‌ها هم قفل می‌شوند (هم‌ترتیبِ قفل در ساخت حواله/سفارش: به ترتیب شناسه) تا تبدیلِ هم‌زمان با بستن صف شود
   const ids: { id: number }[] = await tx.$queryRaw`SELECT "id" FROM "SalesQuoteLine" WHERE "salesQuoteId" = ${quoteId} ORDER BY "id" FOR UPDATE`;

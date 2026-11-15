@@ -763,7 +763,7 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
-          { key: "sales-quotes", title: "پیش‌فاکتور", baseActions: CRUD, actions: [...APPROVE_UNAPPROVE, { key: "closeFollowUp", title: "بستن/بازگشایی پیگیری" }] },
+          { key: "sales-quotes", title: "پیش‌فاکتور", baseActions: CRUD, actions: [...APPROVE_UNAPPROVE, { key: "closeFollowUp", title: "بستن/بازگشایی پیگیری" }, { key: "amend", title: "اصلاح پیش‌فاکتور تاییدشده" }] },
           { key: "sales-orders", title: "سفارش فروش", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
           { key: "sales-deliveries", title: "حواله فروش", baseActions: CRUD, actions: [VIEW_ACCOUNTING], requiresModule: "inventory" },
           {

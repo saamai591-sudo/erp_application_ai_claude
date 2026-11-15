@@ -11,6 +11,7 @@ import { updateParty, PartyError, PartyWarning, PartyInput } from "../services/p
 import { createCustomer, CustomerError } from "../services/customerService";
 import { assertPartyGroup } from "./partyGroups";
 import { followUpStateOf, quoteRemainders } from "../services/salesQuoteFollowUpService";
+import { amendSalesQuote, getRevision, listRevisions, quoteLineCirculation } from "../services/salesQuoteAmendService";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
 import { getRequestContext } from "../lib/requestContext";
 import { partyTitle } from "../utils/partyTitle";
@@ -150,7 +151,7 @@ interface QuotePricingContext {
 
 const PRICE_EPS = 1e-9;
 
-async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Date, decimalPlaces = 2, pricing?: QuotePricingContext) {
+async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Date, decimalPlaces = 2, pricing?: QuotePricingContext, rowNumbers?: number[]) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("پیش‌فاکتور باید حداقل یک ردیف کالا داشته باشد");
   const cleaned: ({ goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null } & QuotePriceAudit)[] = [];
   // اعلامیه‌ی مؤثر و قیمت‌های همه‌ی کالاها یک‌جا (دو کوئری، نه یکی برای هر ردیف)
@@ -161,26 +162,26 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Da
   const keepPool = [...(pricing?.keepFrom ?? [])];
   for (const [idx, l] of lines.entries()) {
     const qty = Number(l.quantity);
-    if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
+    if (!(qty > 0)) throw new Error(`مقدار ردیف ${rowNumbers?.[idx] ?? idx + 1} باید عددی مثبت باشد`);
     const unitPrice = Number(l.unitPrice) || 0;
     const amount = Number(l.amount) || 0;
-    if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${idx + 1} نامعتبر است`);
-    if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${idx + 1} نامعتبر است`);
+    if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${rowNumbers?.[idx] ?? idx + 1} نامعتبر است`);
+    if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${rowNumbers?.[idx] ?? idx + 1} نامعتبر است`);
     const discount = Number(l.discount) || 0;
-    if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${idx + 1} نامعتبر است`);
-    if (discount > amount) throw new Error(`تخفیف ردیف ${idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
-    if (!l.goodsItemId) throw new Error(`کالا برای ردیف ${idx + 1} الزامی است`);
+    if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${rowNumbers?.[idx] ?? idx + 1} نامعتبر است`);
+    if (discount > amount) throw new Error(`تخفیف ردیف ${rowNumbers?.[idx] ?? idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
+    if (!l.goodsItemId) throw new Error(`کالا برای ردیف ${rowNumbers?.[idx] ?? idx + 1} الزامی است`);
 
     const item = await prisma.goodsItem.findUnique({ where: { id: l.goodsItemId } });
-    if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
-    if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
+    if (!item) throw new Error(`کالای ردیف ${rowNumbers?.[idx] ?? idx + 1} یافت نشد`);
+    if (!item.isActive) throw new Error(`کالای ردیف ${rowNumbers?.[idx] ?? idx + 1} غیرفعال است`);
     const unitId = l.unitId || item.mainUnitId;
 
     const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
     // ارزش‌افزوده روی «مبلغ − تخفیف» (هم‌الگوی فاکتور فروش)
     const suggestedVatAmount = computeLineVat(amount, discount, vatRatePercent, decimalPlaces);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Math.round(Number(l.vatAmount) * 10 ** decimalPlaces) / 10 ** decimalPlaces : suggestedVatAmount;
-    if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
+    if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${rowNumbers?.[idx] ?? idx + 1} نامعتبر است`);
 
     // ممیزی قیمت: ردیف ذخیره‌شده‌ی بدون تغییر کالا/مقدار مرجع قبلی را نگه می‌دارد، وگرنه از اعلامیه‌ی مؤثر محاسبه می‌شود
     let audit: QuotePriceAudit = { priceSource: "MANUAL", basePrice: null, listPrice: null, priceListId: null, priceRuleId: null };
@@ -243,6 +244,7 @@ router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) 
       salesCenterTitle: d.salesCenter.title,
       currencyTitle: d.currency.title,
       status: d.status,
+      amendmentNumber: d.amendmentNumber,
       followUpState: followUpStateOf(d, remainders.get(d.id)),
       followUpReasonTitle: d.followUpReason?.title ?? null,
       followUpClosedAt: d.followUpClosedAt,
@@ -267,9 +269,13 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
     },
   });
   if (!d) return res.status(404).json({ error: "پیش‌فاکتور یافت نشد" });
+  // گردش ردیفی هر ردیف (فقط برای تاییدشده معنا دارد): ردیف دارای گردش در «اصلاح پیش‌فاکتور» قفل است
+  const circulation = d.status === "APPROVED" ? await quoteLineCirculation(d.lines) : new Map<number, string[]>();
   res.json({
     id: d.id,
     number: d.number,
+    amendmentNumber: d.amendmentNumber,
+    followUpClosed: !!d.followUpClosedAt,
     date: d.date,
     customerId: d.customerId,
     customerTitle: partyTitle(d.customer.party),
@@ -296,6 +302,7 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
       discount: Number(l.discount),
       vatAmount: Number(l.vatAmount),
       description: l.description,
+      lockedBy: circulation.get(l.id) ?? [],
       priceSource: l.priceSource,
       basePrice: l.basePrice === null ? null : Number(l.basePrice),
       listPrice: l.listPrice === null ? null : Number(l.listPrice),
@@ -416,6 +423,26 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ذخیره" });
   }
+});
+
+// اصلاح پیش‌فاکتورِ تاییدشده (قواعد: services/salesQuoteAmendService.ts)؛ مجوز جدا از ویرایش — هیچ شرط تغییرناپذیریِ حالت تایید عوض نمی‌شود
+router.post("/sales-quotes/:id/amend", can(`${SALES_QUOTES_FORM}.amend`), async (req, res) => {
+  try {
+    const r = await amendSalesQuote(Number(req.params.id), req.body, getRequestContext()?.userId ?? null, { validateLines: validateSalesQuoteLines });
+    res.json(r);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ثبت اصلاحیه" });
+  }
+});
+
+router.get("/sales-quotes/:id/revisions", can(`${SALES_QUOTES_FORM}.view`), async (req, res) => {
+  res.json(await listRevisions(Number(req.params.id)));
+});
+
+router.get("/sales-quotes/:id/revisions/:number", can(`${SALES_QUOTES_FORM}.view`), async (req, res) => {
+  const r = await getRevision(Number(req.params.id), Number(req.params.number));
+  if (!r) return res.status(404).json({ error: "نسخه یافت نشد" });
+  res.json(r);
 });
 
 /**

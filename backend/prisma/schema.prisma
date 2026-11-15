@@ -114,6 +114,7 @@ model User {
   inventoryAccountingCloseLogs    InventoryAccountingCloseLog[]
   purchaseInvoicesApproved        PurchaseInvoice[]               @relation("PurchaseInvoiceApprover")
   servicePurchaseInvoicesApproved ServicePurchaseInvoice[]        @relation("ServicePurchaseInvoiceApprover")
+  salesQuoteRevisions             SalesQuoteRevision[]            @relation("SalesQuoteRevisionCreator")
 }
 
 model UserRole {
@@ -1343,24 +1344,24 @@ model BatchNumberCounter {
 // یکتایی روی (goodsItemId, batchNumber) — یعنی همان شماره بچ برای دو کالای مختلف مجاز است (بند ۱۲).
 // تاریخ انقضا فقط اینجا نگه‌داری می‌شود، نه در سطر سند انبار (بند ۱۳).
 model Batch {
-  id                    Int                  @id @default(autoincrement())
-  goodsItemId           Int
-  batchNumber           String
-  productionDate        DateTime?            @db.Date
-  expiryDate            DateTime?            @db.Date
-  sourceType            BatchSourceType      @default(MANUAL)
-  supplierId            Int?
+  id                  Int                  @id @default(autoincrement())
+  goodsItemId         Int
+  batchNumber         String
+  productionDate      DateTime?            @db.Date
+  expiryDate          DateTime?            @db.Date
+  sourceType          BatchSourceType      @default(MANUAL)
+  supplierId          Int?
   /// بچ تولیدی: دستور تولیدی که بچ برای آن ساخته شده (اختیاری؛ فقط سیستم پر می‌کند)
-  productionOrderId     Int?
-  description           String?
-  isActive              Boolean              @default(true)
-  hasTransactions       Boolean              @default(false)
-  createdAt             DateTime             @default(now())
-  goodsItem             GoodsItem            @relation(fields: [goodsItemId], references: [id])
-  supplier              Party?               @relation("BatchSupplier", fields: [supplierId], references: [id])
-  productionOrder       ProductionOrder?     @relation("BatchProductionOrder", fields: [productionOrderId], references: [id], onDelete: Restrict)
-  inventoryLines        InventoryLineBatch[]
-  productionStatLines   ProductionStatLine[]
+  productionOrderId   Int?
+  description         String?
+  isActive            Boolean              @default(true)
+  hasTransactions     Boolean              @default(false)
+  createdAt           DateTime             @default(now())
+  goodsItem           GoodsItem            @relation(fields: [goodsItemId], references: [id])
+  supplier            Party?               @relation("BatchSupplier", fields: [supplierId], references: [id])
+  productionOrder     ProductionOrder?     @relation("BatchProductionOrder", fields: [productionOrderId], references: [id], onDelete: Restrict)
+  inventoryLines      InventoryLineBatch[]
+  productionStatLines ProductionStatLine[]
 
   @@unique([goodsItemId, batchNumber])
   @@index([productionOrderId])
@@ -2582,8 +2583,27 @@ model SalesQuote {
   closedRemainingVat     Decimal?                @db.Decimal(36, 10)
   followUpClosedBy       User?                   @relation("SalesQuoteFollowUpClosedBy", fields: [followUpClosedById], references: [id], onDelete: SetNull)
   followUpReason         SalesQuoteLostReason?   @relation(fields: [followUpReasonId], references: [id], onDelete: Restrict)
+  /// شماره‌ی آخرین اصلاحیه‌ی پیش‌فاکتورِ تاییدشده (۰ = اصلاح‌نشده)؛ تاریخچه‌ی کامل در SalesQuoteRevision
+  amendmentNumber        Int                     @default(0)
+  revisions              SalesQuoteRevision[]
 
   @@unique([fiscalPeriodId, number])
+}
+
+/// هر نسخه‌ی پیش‌فاکتور: number ۰ = وضعیت اولیه‌ی تاییدشده (هنگام اولین اصلاحیه ثبت می‌شود)، بعدی‌ها = وضعیت پس از هر اصلاحیه. snapshot = عکس کامل ردیف‌ها و جمع‌ها؛ changes = خلاصه‌ی تغییر نسبت به نسخه‌ی قبل
+model SalesQuoteRevision {
+  id           Int        @id @default(autoincrement())
+  salesQuoteId Int
+  number       Int
+  createdAt    DateTime   @default(now())
+  createdById  Int?
+  reason       String?
+  snapshot     Json
+  changes      Json
+  salesQuote   SalesQuote @relation(fields: [salesQuoteId], references: [id], onDelete: Cascade)
+  createdBy    User?      @relation("SalesQuoteRevisionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([salesQuoteId, number])
 }
 
 /// دلایل «فروش نشد» برای بستن پیگیری پیش‌فاکتور (قیمت بالا، رقیب، بودجه نداشت، …)
@@ -9068,17 +9088,17 @@ enum MrpPlannedStatus {
 
 /// فرمول ساخت (BOM): نسخه‌ی تاریخ‌دار یک کالای تولیدی؛ نسخه‌ای که دستور تولید به آن وصل است قفل است
 model Bom {
-  id             Int               @id @default(autoincrement())
-  number         Int               @unique
+  id             Int                  @id @default(autoincrement())
+  number         Int                  @unique
   outputItemId   Int
   /// مقدار خروجی که مقدارهای ردیف‌ها برای آن نوشته شده‌اند
-  outputQuantity Decimal           @default(1) @db.Decimal(36, 10)
-  effectiveDate  DateTime          @db.Date
+  outputQuantity Decimal              @default(1) @db.Decimal(36, 10)
+  effectiveDate  DateTime             @db.Date
   description    String?
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  outputItem     GoodsItem         @relation("BomOutput", fields: [outputItemId], references: [id])
+  isActive       Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  outputItem     GoodsItem            @relation("BomOutput", fields: [outputItemId], references: [id])
   lines          BomLine[]
   orders         ProductionOrder[]
   wipLines       WipCountLine[]
@@ -9174,17 +9194,17 @@ enum CostBehavior {
 /// ساختار بهای تمام‌شده: درخت با چهار ریشه‌ی سیستمی (مواد، انتقالی، دستمزد، سربار) و زیرشاخه‌های کاربر (حداکثر عمق ۳)؛
 /// برگ‌های مواد/انتقالی در ردیف فرمول ساخت و برگ‌های دستمزد/سربار («عامل جمع‌آوری») در قاعده‌ی معین انتخاب می‌شوند
 model CostStructureNode {
-  id               Int                         @id @default(autoincrement())
-  parentId         Int?
-  root             CostStructureRoot
-  title            String
-  isSystem         Boolean                     @default(false)
-  isActive         Boolean                     @default(true)
-  parent           CostStructureNode?          @relation("CostStructureTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children         CostStructureNode[]         @relation("CostStructureTree")
-  accountRules     CostAccountRule[]
-  bomLines         BomLine[]
-  components       ProductionCostComponent[]
+  id           Int                       @id @default(autoincrement())
+  parentId     Int?
+  root         CostStructureRoot
+  title        String
+  isSystem     Boolean                   @default(false)
+  isActive     Boolean                   @default(true)
+  parent       CostStructureNode?        @relation("CostStructureTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children     CostStructureNode[]       @relation("CostStructureTree")
+  accountRules CostAccountRule[]
+  bomLines     BomLine[]
+  components   ProductionCostComponent[]
 
   @@unique([parentId, title])
   @@index([parentId])
@@ -9229,30 +9249,30 @@ model CostTimeDriver {
 /// زمان‌بندی تولید: برای یک مرکز هزینه از «تاریخ اجرا» به بعد، زمان استاندارد هر کالا به تفکیک مبنای زمانی؛
 /// مقدار مؤثر هر (مرکز، کالا، مبنا) در یک تاریخ = ردیف آخرین برگه‌ای که آن را دارد و تاریخ اجرایش ≤ آن تاریخ است (برای هر ردیف آمار: تاریخ آمار)
 model ProductionTimeSheet {
-  id                    Int                  @id @default(autoincrement())
-  costCenterId          Int
-  effectiveDate         DateTime             @db.Date
-  description           String?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  costCenter            CostCenter           @relation(fields: [costCenterId], references: [id])
-  lines                 ProductionTimeLine[]
+  id            Int                  @id @default(autoincrement())
+  costCenterId  Int
+  effectiveDate DateTime             @db.Date
+  description   String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  costCenter    CostCenter           @relation(fields: [costCenterId], references: [id])
+  lines         ProductionTimeLine[]
 
   @@unique([costCenterId, effectiveDate])
 }
 
 model ProductionTimeLine {
-  id             Int                 @id @default(autoincrement())
-  sheetId        Int
-  goodsItemId    Int
-  driverId       Int
+  id          Int                 @id @default(autoincrement())
+  sheetId     Int
+  goodsItemId Int
+  driverId    Int
   /// «برای تولید»: مقدار پایه (به واحد اصلی کالا) که زمان برای آن نوشته شده، مثلاً ۲۴۰۰ کیلو؛ زمان هر واحد = minutes ÷ forQuantity (CHECK > 0)
-  forQuantity    Decimal             @default(1) @db.Decimal(36, 10)
+  forQuantity Decimal             @default(1) @db.Decimal(36, 10)
   /// زمان (دقیقه) برای forQuantity (صفر = این کالا از این مرحله عبور نمی‌کند)
-  minutes        Decimal             @db.Decimal(36, 10)
-  sheet          ProductionTimeSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
-  goodsItem      GoodsItem           @relation(fields: [goodsItemId], references: [id])
-  driver         CostTimeDriver      @relation(fields: [driverId], references: [id])
+  minutes     Decimal             @db.Decimal(36, 10)
+  sheet       ProductionTimeSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  goodsItem   GoodsItem           @relation(fields: [goodsItemId], references: [id])
+  driver      CostTimeDriver      @relation(fields: [driverId], references: [id])
 
   @@unique([sheetId, goodsItemId, driverId])
   @@index([goodsItemId])
@@ -9276,23 +9296,23 @@ model WipCount {
 }
 
 model WipCountLine {
-  id                     Int                     @id @default(autoincrement())
+  id                     Int        @id @default(autoincrement())
   wipCountId             Int
   /// مرکز هزینه‌ای که پای کار در آن است
   costCenterId           Int
   goodsItemId            Int
-  quantity               Decimal                 @db.Decimal(36, 10)
+  quantity               Decimal    @db.Decimal(36, 10)
   /// فقط برای محصول/نیمه‌ساخته‌ای که همین مرکز تولید می‌کند: خالی = ماده‌ی در جریان (قیمت از موجودی انبار)
-  completionPercent      Decimal?                @db.Decimal(10, 4)
+  completionPercent      Decimal?   @db.Decimal(10, 4)
   /// فقط فرم افتتاحیه: ارزش مواد و ارزش تبدیلِ ردیف (کاربر وارد می‌کند؛ در فرم آخر دوره سیستم محاسبه می‌کند)
-  openingMaterialValue   Decimal?                @db.Decimal(36, 10)
-  openingConversionValue Decimal?                @db.Decimal(36, 10)
+  openingMaterialValue   Decimal?   @db.Decimal(36, 10)
+  openingConversionValue Decimal?   @db.Decimal(36, 10)
   /// ردیف دارای درصد پیشرفت (هر دو نوع فرم): فرمول ساختی که این پای کار از آن می‌آید (الزامی)؛ ردیف ماده‌ی در جریان فرمول ندارد
   bomId                  Int?
-  bom                    Bom?                    @relation(fields: [bomId], references: [id], onDelete: Restrict)
-  wipCount               WipCount                @relation(fields: [wipCountId], references: [id], onDelete: Cascade)
-  costCenter             CostCenter              @relation(fields: [costCenterId], references: [id])
-  goodsItem              GoodsItem               @relation(fields: [goodsItemId], references: [id])
+  bom                    Bom?       @relation(fields: [bomId], references: [id], onDelete: Restrict)
+  wipCount               WipCount   @relation(fields: [wipCountId], references: [id], onDelete: Cascade)
+  costCenter             CostCenter @relation(fields: [costCenterId], references: [id])
+  goodsItem              GoodsItem  @relation(fields: [goodsItemId], references: [id])
 
   @@index([wipCountId])
 }
