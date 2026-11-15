@@ -638,7 +638,12 @@ export const REGISTRY: ModuleDef[] = [
               { key: "createChildren", title: "ساخت دستورهای سطح پایین برای کسری" },
             ],
           },
-          { key: "production-stats", title: "آمار تولید", baseActions: CRUD },
+          {
+            key: "production-stats",
+            title: "آمار تولید",
+            baseActions: CRUD,
+            actions: [{ key: "confirm", title: "تایید آمار (ساخت بچ)" }, { key: "unconfirm", title: "برگشت از تایید آمار" }],
+          },
           { key: "production-deliveries", title: "تحویل تولید", baseActions: CRUD },
         ],
       },

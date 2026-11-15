@@ -9346,6 +9346,11 @@ enum ProductionStatBasis {
   PRODUCTION_ORDER
 }
 
+enum ProductionStatStatus {
+  DRAFT
+  CONFIRMED
+}
+
 model ProductionStat {
   id             Int                  @id @default(autoincrement())
   number         Int
@@ -9354,6 +9359,10 @@ model ProductionStat {
   costCenterId   Int
   /// بدون مبنا (تولید روی انبار) یا بر مبنای دستور تولید (دستور هر ردیف الزامی)
   basis          ProductionStatBasis  @default(NO_BASIS)
+  /// ثبت (پیش‌نویس: قابل ویرایش، بدون بچ) ← تایید‌شده (قفل؛ بچ کالاهای بچ‌دار هنگام تایید ساخته و روی ردیف‌ها ثبت می‌شود)
+  status         ProductionStatStatus @default(DRAFT)
+  confirmedAt    DateTime?
+  confirmedById  Int?
   description    String?
   createdById    Int?
   createdAt      DateTime             @default(now())

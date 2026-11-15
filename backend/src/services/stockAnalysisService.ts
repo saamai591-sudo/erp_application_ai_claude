@@ -43,6 +43,7 @@ const RECEIVED_BY_PO_SQL = `SELECT x."poLineId", SUM(x.qty) AS qty FROM (
 /** مانده‌ی تولید هر دستور صادرشده: مقدار دستور − جمع آمار تولید وصل‌شده به آن (SQL مشترک خلاصه‌ی «در حال تولید» و ریز آن) */
 const ORDER_PRODUCED_SQL = `SELECT sl."productionOrderId" AS "orderId", SUM(sl."quantity") AS qty
         FROM "ProductionStatLine" sl
+        JOIN "ProductionStat" st ON st."id" = sl."statId" AND st."status"::text = 'CONFIRMED'
         WHERE sl."productionOrderId" IS NOT NULL
         GROUP BY sl."productionOrderId"`;
 

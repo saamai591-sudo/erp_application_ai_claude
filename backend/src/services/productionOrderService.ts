@@ -25,7 +25,7 @@ export async function orderQuantities(orderIds: number[]) {
   const produced = new Map<number, number>();
   const consumed = new Map<number, Map<number, number>>(); // orderId → item → qty
   if (!orderIds.length) return { produced, consumed };
-  const stats = await prisma.productionStatLine.groupBy({ by: ["productionOrderId"], where: { productionOrderId: { in: orderIds } }, _sum: { quantity: true } });
+  const stats = await prisma.productionStatLine.groupBy({ by: ["productionOrderId"], where: { productionOrderId: { in: orderIds }, stat: { status: "CONFIRMED" } }, _sum: { quantity: true } });
   for (const r of stats) if (r.productionOrderId) produced.set(r.productionOrderId, num(r._sum.quantity));
   const rows = await prisma.inventoryDocumentLine.findMany({
     where: { document: { productionOrderId: { in: orderIds }, documentType: { in: ["PRODUCTION_CONSUMPTION", "PRODUCTION_CONSUMPTION_RETURN"] } } },

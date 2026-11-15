@@ -66,7 +66,7 @@ router.get("/production-reports/variance", can(`${VARIANCE}.view`), async (req, 
     const hasDate = !!from || !!to;
     const centers = await prisma.costCenter.findMany({ select: { id: true, title: true, detailCode: true } });
     const centerByCode = new Map(centers.map((c) => [c.detailCode, c]));
-    const stats = await prisma.productionStatLine.findMany({ where: hasDate ? { stat: { date: dateWhere } } : {}, select: { goodsItemId: true, quantity: true, bomId: true, stat: { select: { costCenterId: true, date: true } } } });
+    const stats = await prisma.productionStatLine.findMany({ where: hasDate ? { stat: { date: dateWhere, status: "CONFIRMED" } } : { stat: { status: "CONFIRMED" } }, select: { goodsItemId: true, quantity: true, bomId: true, stat: { select: { costCenterId: true, date: true } } } });
     const planned = new Map<string, number>(); // مرکز:جزء ← مقدار لازم
     const bomCache = new Map<string, any>();
     for (const st of stats) {

@@ -45,6 +45,12 @@ export function toJalaliYearMonth(date: Date): { year: number; month: number } {
   return { year: j.year, month: j.month.number };
 }
 
+/** تاریخ میلادی ذخیره‌شده را به رشته‌ی شمسی فشرده‌ی ۸ رقمی با ارقام انگلیسی (مثلاً 14050820) تبدیل می‌کند — برای شماره‌هایی که تاریخ در آن‌هاست */
+export function toJalaliCompact(date: Date): string {
+  const j = new DateObject({ date, calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
+  return `${j.year}${String(j.month.number).padStart(2, "0")}${String(j.day).padStart(2, "0")}`;
+}
+
 /**
  * تاریخ میلادی را به رشته‌ی شمسی YYYY/MM/DD (ارقام انگلیسی، هم‌الگوی بقیه‌ی اعداد داخل پیام‌های خطای
  * بک‌اند) تبدیل می‌کند — برای نمایش تاریخ داخل پیام‌های خطای کاربرپسند (کاربر تاریخ میلادی خام را

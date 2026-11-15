@@ -164,13 +164,14 @@ async function validateBasis(body: HeaderBody, cleaned: { goodsItemId: number; u
     return src;
   }
   if (src.some((x) => !x)) throw new Error("در رسید «بر مبنای آمار تولید» برای همه‌ی ردیف‌ها باید ردیف آمار انتخاب شود");
-  const statLines = await prisma.productionStatLine.findMany({ where: { id: { in: src as number[] } }, include: { stat: { select: { number: true, date: true, costCenterId: true } }, goodsItem: { select: { title: true, mainUnitId: true } } } });
+  const statLines = await prisma.productionStatLine.findMany({ where: { id: { in: src as number[] } }, include: { stat: { select: { number: true, date: true, costCenterId: true, status: true } }, goodsItem: { select: { title: true, mainUnitId: true } } } });
   const byId = new Map(statLines.map((s) => [s.id, s]));
   const usage = await statLineUsage(src as number[], { receiptDocId: excludeDocId });
   const taken = new Map<number, number>();
   for (const [i, l] of cleaned.entries()) {
     const sl = byId.get(src[i] as number);
     if (!sl) throw new Error(`ردیف ${i + 1}: ردیف آمار تولید یافت نشد`);
+    if (sl.stat.status !== "CONFIRMED") throw new Error(`ردیف ${i + 1}: آمار شماره ${sl.stat.number} تایید نشده است`);
     if (sl.stat.costCenterId !== Number(body.costCenterId)) throw new Error(`ردیف ${i + 1}: آمار شماره ${sl.stat.number} مربوط به مرکز هزینه‌ی این سند نیست`);
     if (sl.goodsItemId !== l.goodsItemId) throw new Error(`ردیف ${i + 1}: کالای ردیف با کالای آمار شماره ${sl.stat.number} یکی نیست`);
     if (date < sl.stat.date) throw new Error(`ردیف ${i + 1}: تاریخ رسید قبل از تاریخ آمار شماره ${sl.stat.number} است`);

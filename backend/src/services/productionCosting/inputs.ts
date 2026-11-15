@@ -1,5 +1,5 @@
 import { prisma } from "../../lib/prisma";
-import { isProducedType, num, round } from "../productionCommon";
+import { fail, isProducedType, num, round } from "../productionCommon";
 import { bomWork } from "./types";
 import type { CenterCalc, CenterItemCalc, CostCtx, CostInputs } from "./types";
 import { PROD_DOC_TYPES } from "./types";
@@ -17,7 +17,9 @@ export async function loadInputs(ctx: CostCtx): Promise<CostInputs> {
     where: { documentType: { in: [...PROD_DOC_TYPES] }, date: range },
     select: { id: true, documentType: true, detailCode: true, lines: { select: { id: true, goodsItemId: true, quantity: true } } },
   });
-  const statLines = await prisma.productionStatLine.findMany({ where: { stat: { date: range } }, select: { id: true, goodsItemId: true, quantity: true, productionOrderId: true, bomId: true, stat: { select: { costCenterId: true, date: true } } } });
+  const draftStats = await prisma.productionStat.findMany({ where: { date: range, status: "DRAFT" }, select: { number: true }, orderBy: { number: "asc" }, take: 10 });
+  if (draftStats.length) fail(`آمار تولید تاییدنشده‌ی این دوره هست (شماره‌ی ${draftStats.map((d) => d.number).join("، ")}${draftStats.length === 10 ? " …" : ""}) — آن‌ها را تایید یا حذف کنید`);
+  const statLines = await prisma.productionStatLine.findMany({ where: { stat: { date: range, status: "CONFIRMED" } }, select: { id: true, goodsItemId: true, quantity: true, productionOrderId: true, bomId: true, stat: { select: { costCenterId: true, date: true } } } });
   const deliveryLines = await prisma.productionDeliveryLine.findMany({ where: { delivery: { date: range } }, select: { id: true, goodsItemId: true, quantity: true, delivery: { select: { fromCostCenterId: true, toCostCenterId: true } } } });
 
   const wipEnd = await prisma.wipCount.findFirst({ where: { reportingPeriodId: rp.id, kind: "PERIOD_END", status: "APPROVED" }, include: { lines: true } });

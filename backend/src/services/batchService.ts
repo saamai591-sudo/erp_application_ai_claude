@@ -65,18 +65,6 @@ export async function generateBatchNumber(goodsItemId: number, db: Db = prisma):
   }
 }
 
-/** شماره‌ی بچ تولیدی: «P<شماره‌ی دستور>» و برای بچ‌های بعدیِ همان دستور «P<شماره>-۲»، «-۳» … (بدون دستور: شماره‌ی عمومی B####) */
-export async function generateProductionBatchNumber(goodsItemId: number, orderNumber: number | null, db: Db = prisma): Promise<string> {
-  if (!orderNumber) return generateBatchNumber(goodsItemId, db);
-  const base = `P${orderNumber}`;
-  let candidate = base;
-  for (let n = 2; ; n++) {
-    // eslint-disable-next-line no-await-in-loop
-    if (!(await db.batch.findUnique({ where: { goodsItemId_batchNumber: { goodsItemId, batchNumber: candidate } }, select: { id: true } }))) return candidate;
-    candidate = `${base}-${n}`;
-  }
-}
-
 /**
  * موجودی فعلی یک بچ (اطلاعاتی، برای ستون «تعداد» پیکر بچ طبق «انتخاب سریال و بچ») — دقیقا هم‌الگوی
  * SIGNED_TYPES در warehouseStockService.ts (وارده +۱ / صادره -۱)، فقط به‌جای گروه‌بندی بر اساس انبار،

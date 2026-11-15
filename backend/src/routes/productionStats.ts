@@ -4,7 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { DELIVERY_INCLUDE, STAT_INCLUDE, createProductionDelivery, createProductionStat, deleteProductionDelivery, deleteProductionStat, deliveryShape, pickableStatLines, statLineUsage, statShape, updateProductionDelivery, updateProductionStat } from "../services/productionStatService";
+import { DELIVERY_INCLUDE, STAT_INCLUDE, createProductionDelivery, confirmProductionStat, createProductionStat, deleteProductionDelivery, deleteProductionStat, deliveryShape, pickableStatLines, statLineUsage, statShape, unconfirmProductionStat, updateProductionDelivery, updateProductionStat } from "../services/productionStatService";
 import { parseDay, sendError } from "../services/productionCommon";
 import { eligibleBoms } from "../services/bomService";
 
@@ -67,6 +67,26 @@ router.put("/production-stats/:id", can(`${STAT_FORM}.edit`), async (req, res) =
     res.json(statShape(updated, await statLineUsage(updated.lines.map((l) => l.id))));
   } catch (e) {
     sendError(res, e, "خطا در ویرایش آمار تولید");
+  }
+});
+
+// تایید آمار: ساخت بچ کالاهای بچ‌دار (یا ادغام با بچ موجود) و قفل‌شدن آمار
+router.post("/production-stats/:id/confirm", can(`${STAT_FORM}.confirm`), async (req: AuthedRequest, res) => {
+  try {
+    const id = Number(req.params.id);
+    const done = await confirmProductionStat(id, req.body, req.user?.id);
+    res.json(statShape(done, await statLineUsage(done.lines.map((l) => l.id))));
+  } catch (e) {
+    sendError(res, e, "خطا در تایید آمار تولید");
+  }
+});
+
+router.post("/production-stats/:id/unconfirm", can(`${STAT_FORM}.unconfirm`), async (req, res) => {
+  try {
+    const done = await unconfirmProductionStat(Number(req.params.id));
+    res.json(statShape(done, await statLineUsage(done.lines.map((l) => l.id))));
+  } catch (e) {
+    sendError(res, e, "خطا در برگشت از تایید آمار تولید");
   }
 });
 
