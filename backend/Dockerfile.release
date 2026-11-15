@@ -8,7 +8,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npx prisma generate
-RUN npx tsc -p tsconfig.release.json
+# حجم پروژه از سقف پیش‌فرض heap (حدود ۲ گیگابایت) گذشته؛ فقط برای همین دستور بالا می‌رود (متغیر محیطی همین RUN است و به ایمیج اجرا نمی‌رسد)
+RUN NODE_OPTIONS=--max-old-space-size=6144 npx tsc -p tsconfig.release.json
 RUN node release/compile-bytecode.cjs build-tsc dist dist-maps \
  && cp -r src/assets dist/src/assets \
  && cp package.json dist/package.json
