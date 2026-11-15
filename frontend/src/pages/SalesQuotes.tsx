@@ -50,7 +50,7 @@ const GOODS_SCOPE: GoodsScope = { kind: "GOODS,SERVICE", docDirection: "OUTBOUND
 type Status = "DRAFT" | "APPROVED";
 
 interface CustomerOption { id: number; code: number; partyId?: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
-interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
+interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number; isBase?: boolean }
 
 interface ListRow { amendmentNumber?: number; followUpState?: string | null; followUpReasonTitle?: string | null; closedRemainingAmount?: number | null; id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; listPrice?: number | null; lockedBy?: string[] }
@@ -512,6 +512,10 @@ function SalesQuoteForm({ editId, amend }: { editId?: number; /** اصلاح پ�
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const totalDiscount = rows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
   const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
+  // مبلغ خالص = مبلغ − تخفیف + ارزش افزوده (فقط برای ارز پایه نمایش داده می‌شود)
+  const isBaseCurrency = !!currencies.find((c) => String(c.id) === String(header.currencyId))?.isBase;
+  const netOf = (r: { amount: string; discount: string; vatAmount: string }) => (Number(r.amount) || 0) - (Number(r.discount) || 0) + (Number(r.vatAmount) || 0);
+  const totalNet = totalAmount - totalDiscount + totalVat;
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId);
@@ -777,6 +781,7 @@ function SalesQuoteForm({ editId, amend }: { editId?: number; /** اصلاح پ�
                   <th>مبلغ</th>
                   <th>تخفیف</th>
                   <th>مالیات بر ارزش افزوده</th>
+                  {isBaseCurrency && <th>مبلغ خالص</th>}
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -815,6 +820,7 @@ function SalesQuoteForm({ editId, amend }: { editId?: number; /** اصلاح پ�
                       <td data-label="ارزش افزوده" style={{ minWidth: 120 }}>
                         <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" disabled={rl} />
                       </td>
+                      {isBaseCurrency && <td data-label="مبلغ خالص" style={{ minWidth: 120, fontWeight: 600, whiteSpace: "nowrap" }} title="مبلغ − تخفیف + ارزش افزوده">{formatAmountFa(netOf(row))}</td>}
                       <td data-label="شرح" style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={rl} />
                       </td>
@@ -831,7 +837,7 @@ function SalesQuoteForm({ editId, amend }: { editId?: number; /** اصلاح پ�
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع مبلغ: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}</span>
+            <span className="je-lines-totals">جمع مبلغ: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}{isBaseCurrency && <> — <b>جمع مبلغ خالص: {formatAmountFa(totalNet)}</b></>}</span>
           </div>
         </div>
       </form>

@@ -591,6 +591,10 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const totalDiscount = rows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
   const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
+  // مبلغ خالص = مبلغ − تخفیف + ارزش افزوده (فقط برای ارز پایه نمایش داده می‌شود)
+  const isBaseCurrency = !!selectedCurrency?.isBase;
+  const netOf = (r: { amount: string; discount: string; vatAmount: string }) => (Number(r.amount) || 0) - (Number(r.discount) || 0) + (Number(r.vatAmount) || 0);
+  const totalNet = totalAmount - totalDiscount + totalVat;
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId || sourceKey(r));
@@ -845,6 +849,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                   <th>مبلغ</th>
                   <th>تخفیف</th>
                   <th>مالیات بر ارزش افزوده</th>
+                  {isBaseCurrency && <th>مبلغ خالص</th>}
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -907,6 +912,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />
                       </td>
+                      {isBaseCurrency && <td style={{ minWidth: 120, fontWeight: 600, whiteSpace: "nowrap" }} title="مبلغ − تخفیف + ارزش افزوده">{formatAmountFa(netOf(row))}</td>}
                       <td style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} />
                       </td>
@@ -925,6 +931,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
             <span className="je-lines-totals">
               جمع مبلغ اقلام: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}
+              {isBaseCurrency && <> — <b>جمع مبلغ خالص: {formatAmountFa(totalNet)}</b></>}
             </span>
           </div>
         </div>
