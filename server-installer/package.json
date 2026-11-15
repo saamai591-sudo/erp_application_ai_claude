@@ -1,0 +1,20 @@
+{
+  "name": "erp-server-installer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "نصب‌کننده‌ی ویندوزی ERP روی سرور لینوکسی (از راه SSH): بررسی/نصب پیش‌نیازها و نصب سیستم از ریجستری",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/installer.mjs",
+    "build": "node installer/build.mjs"
+  },
+  "dependencies": {
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نصب‌کننده‌ی ERP روی سرور</title>
+<style>
+  :root { --bg:#f4f5fb; --card:#fff; --ink:#1f2340; --muted:#6b7090; --line:#dfe2f0; --pri:#4f46e5; --ok:#15803d; --warn:#b45309; --err:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14152a; --card:#1d1f3a; --ink:#e8eaff; --muted:#9aa0c8; --line:#2f3260; --pri:#818cf8; --ok:#4ade80; --warn:#fbbf24; --err:#f87171; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font: 14px/1.7 Tahoma, "Segoe UI", sans-serif; }
+  header { background:linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; padding:18px 24px; }
+  header h1 { margin:0; font-size:18px; } header p { margin:2px 0 0; opacity:.85; font-size:12px; }
+  main { max-width:880px; margin:0 auto; padding:18px 16px 40px; display:grid; gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .card h2 { margin:0 0 10px; font-size:15px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:10px 14px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  input { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--ink); font:inherit; direction:ltr; text-align:left; }
+  input.fa { direction:rtl; text-align:right; }
+  input:focus { outline:2px solid var(--pri); outline-offset:-1px; }
+  .hint { font-size:11px; color:var(--muted); margin-top:3px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+  button { padding:9px 18px; border-radius:9px; border:1px solid var(--line); background:transparent; color:var(--ink); font:inherit; cursor:pointer; }
+  button.pri { background:var(--pri); border-color:var(--pri); color:#fff; font-weight:600; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  #log { max-height:380px; overflow:auto; font:12px/1.8 Consolas, monospace; direction:rtl; }
+  #log div { padding:1px 4px; border-radius:4px; white-space:pre-wrap; }
+  .step { font-weight:700; margin-top:8px; color:var(--pri); } .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); font-weight:700; } .raw { color:var(--muted); }
+  #result a { color:var(--pri); word-break:break-all; }
+  #result dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px; }
+  #result dt { color:var(--muted); } #result dd { margin:0; direction:ltr; text-align:left; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>نصب‌کننده‌ی ERP روی سرور لینوکسی</h1>
+  <p>پیش‌نیازها را بررسی و در صورت نبود نصب می‌کند، سپس سیستم را از ریجستری نصب می‌کند. هیچ رمزی ذخیره نمی‌شود.</p>
+</header>
+<main>
+  <section class="card">
+    <h2>۱) اتصال به سرور (SSH)</h2>
+    <div class="grid">
+      <div><label>آدرس سرور</label><input id="host" placeholder="172.16.32.68" autocomplete="off"></div>
+      <div><label>پورت SSH</label><input id="sshPort" value="22"></div>
+      <div><label>نام کاربری</label><input id="user" placeholder="root یا کاربر دارای sudo" autocomplete="off"></div>
+      <div><label>رمز</label><input id="password" type="password" autocomplete="off"></div>
+      <div><label>رمز sudo (اگر با رمز ورود فرق دارد)</label><input id="sudoPassword" type="password" autocomplete="off"><div class="hint">خالی = همان رمز ورود. برای کاربر root لازم نیست.</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>۲) تنظیمات نصب</h2>
+    <div class="grid">
+      <div><label>نام نصب (نام پوشه در /opt)</label><input id="installName" value="ERP"><div class="hint">فقط حروف انگلیسی، عدد، نقطه، - و _</div></div>
+      <div><label>آدرس ریجستری</label><input id="registry" value="repo.saam.ir/saam-ai"></div>
+      <div><label>نام کاربری ریجستری</label><input id="regUser" autocomplete="off"></div>
+      <div><label>رمز ریجستری</label><input id="regPass" type="password" autocomplete="off"></div>
+      <div><label>نسخه</label><input id="version" placeholder="خالی = آخرین نسخه"></div>
+    </div>
+    <div class="row">
+      <button id="btnCheck">بررسی سرور (بدون نصب)</button>
+      <button id="btnInstall" class="pri">نصب</button>
+      <button id="btnQuit" style="margin-inline-start:auto">خروج</button>
+    </div>
+  </section>
+
+  <section class="card hidden" id="logCard">
+    <h2>پیشرفت</h2>
+    <div id="log"></div>
+  </section>
+
+  <section class="card hidden" id="result">
+    <h2>نصب انجام شد</h2>
+    <dl id="resultList"></dl>
+    <p class="hint">قدم بعدی: لینک «مدیریت» را باز کنید، «اطلاعات سرور (XML)» را دانلود و برای این سرور لایسنس صادر کنید و آپلودش کنید. سپس با کاربر پیش‌فرض (موبایل 0999999999 و رمز Admin@123) وارد شوید و همان لحظه رمز را عوض کنید.</p>
+  </section>
+</main>
+<script>
+const TOKEN = "__TOKEN__";
+const $ = (id) => document.getElementById(id);
+const SAVED = ["host", "sshPort", "user", "installName", "registry", "regUser", "version"];
+try { for (const k of SAVED) { const v = localStorage.getItem("erp-inst-" + k); if (v) $(k).value = v; } } catch {}
+let es = null;
+
+function addLine(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls; d.textContent = text;
+  const box = $("log"); box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+function onEvent(ev) {
+  if (ev.type === "step") addLine("step", "▶ " + ev.text);
+  else if (ev.type === "ok") addLine("ok", "  ✔ " + ev.text);
+  else if (ev.type === "warn") addLine("warn", "  ⚠ " + ev.text);
+  else if (ev.type === "err") addLine("err", "  ✖ " + ev.text);
+  else if (ev.type === "raw") addLine("raw", "    " + ev.text);
+  else if (ev.type === "result") showResult(ev.data);
+  else if (ev.type === "end") { setBusy(false); if (es) { es.close(); es = null; } }
+}
+function showResult(r) {
+  if (r.check) { addLine("ok", "  ✔ بررسی انجام شد؛ می‌توانید «نصب» را بزنید"); return; }
+  $("result").classList.remove("hidden");
+  const l = $("resultList"); l.innerHTML = "";
+  const rows = [["وب", r.web], ["مدیریت (لایسنس و به‌روزرسانی)", r.manage], ["پوشه‌ی نصب روی سرور", r.dir], ["نسخه", r.version], ["پورت API", r.apiPort], ["پورت وب", r.webPort]];
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd");
+    if (String(v).startsWith("http")) { const a = document.createElement("a"); a.href = v; a.target = "_blank"; a.textContent = v; dd.appendChild(a); } else dd.textContent = v;
+    l.append(dt, dd);
+  }
+}
+function setBusy(b) { $("btnCheck").disabled = b; $("btnInstall").disabled = b; }
+
+async function start(mode) {
+  const p = {};
+  for (const k of ["host", "sshPort", "user", "password", "sudoPassword", "installName", "registry", "regUser", "regPass", "version"]) p[k] = $(k).value.trim();
+  if (!p.host || !p.user || !p.password) { alert("آدرس سرور، نام کاربری و رمز را وارد کنید"); return; }
+  if (mode === "install" && !p.installName) { alert("نام نصب را وارد کنید"); return; }
+  try { for (const k of SAVED) localStorage.setItem("erp-inst-" + k, p[k]); } catch {}
+  p.mode = mode;
+  $("log").innerHTML = ""; $("logCard").classList.remove("hidden"); $("result").classList.add("hidden");
+  setBusy(true);
+  const r = await fetch("/api/run", { method: "POST", headers: { "content-type": "application/json", "x-token": TOKEN }, body: JSON.stringify(p) });
+  if (!r.ok) { addLine("err", "  ✖ " + ((await r.json().catch(() => ({}))).error || "خطا")); setBusy(false); return; }
+  es = new EventSource("/api/events?token=" + TOKEN);
+  es.onmessage = (m) => onEvent(JSON.parse(m.data));
+  es.onerror = () => {};
+}
+$("btnCheck").onclick = () => start("check");
+$("btnInstall").onclick = () => { if (confirm("نصب روی سرور شروع شود؟")) start("install"); };
+$("btnQuit").onclick = async () => { await fetch("/api/quit", { method: "POST", headers: { "x-token": TOKEN } }).catch(() => {}); document.body.innerHTML = "<p style='padding:40px;text-align:center'>برنامه بسته شد؛ می‌توانید این صفحه را ببندید.</p>"; };
+</script>
+</body>
+</html>
