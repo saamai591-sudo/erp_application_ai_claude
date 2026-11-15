@@ -129,6 +129,7 @@ export function statShape(s: any, usage?: Map<number, StatLineUsage>) {
     date: isoDay(s.date),
     costCenterId: s.costCenterId,
     costCenterTitle: s.costCenter?.title ?? "",
+    basis: s.basis as "NO_BASIS" | "PRODUCTION_ORDER",
     description: s.description ?? "",
     updatedAt: s.updatedAt,
     lineCount: lines.length,
@@ -157,7 +158,8 @@ async function resolveLineBatch(l: any, item: { id: number; title: string; track
     const b = await prisma.batch.findUnique({ where: { id: explicit }, select: { id: true, goodsItemId: true, isActive: true, batchNumber: true, productionOrderId: true } });
     if (!b || b.goodsItemId !== item.id) return fail(`ردیف ${n}: بچ انتخاب‌شده متعلق به کالای «${item.title}» نیست`);
     if (!b!.isActive && b!.id !== prev?.batchId) fail(`ردیف ${n}: بچ «${b!.batchNumber}» غیرفعال است`);
-    if (b!.productionOrderId && orderId && b!.productionOrderId !== orderId) fail(`ردیف ${n}: بچ «${b!.batchNumber}» مربوط به دستور تولید دیگری است`);
+    // بچ متعلق به یک دستور فقط در ردیف همان دستور می‌آید؛ ردیف بدون دستور (آمار «بدون مبنا») بچ دستور را نمی‌گیرد (مگر بچ قبلیِ همان ردیف ذخیره‌شده)
+    if (b!.productionOrderId && b!.productionOrderId !== orderId && b!.id !== prev?.batchId) fail(`ردیف ${n}: بچ «${b!.batchNumber}» مربوط به ${orderId ? "دستور تولید دیگری" : "یک دستور تولید"} است`);
     return { batchId: b!.id, create: null };
   }
   if (l?.newBatch) return { batchId: null, create: { orderId, orderNumber } };
@@ -211,7 +213,14 @@ async function settleProductionBatches(tx: Db, batchIds: (number | null)[]) {
   }
 }
 
-async function cleanStatLines(raw: any[], date: Date, keepBomIds: Set<number> = new Set(), existing: Map<number, { goodsItemId: number; batchId: number | null }> = new Map()) {
+/** مبنای آمار: بدون مبنا (پیش‌فرض) یا بر مبنای دستور تولید */
+function parseBasis(v: unknown): "NO_BASIS" | "PRODUCTION_ORDER" {
+  if (v === undefined || v === null || v === "" || v === "NO_BASIS") return "NO_BASIS";
+  if (v === "PRODUCTION_ORDER") return "PRODUCTION_ORDER";
+  return fail("مبنای آمار تولید نامعتبر است");
+}
+
+async function cleanStatLines(raw: any[], date: Date, basis: "NO_BASIS" | "PRODUCTION_ORDER", keepBomIds: Set<number> = new Set(), existing: Map<number, { goodsItemId: number; batchId: number | null }> = new Map()) {
   if (!Array.isArray(raw) || !raw.length) return fail("آمار تولید باید حداقل یک ردیف داشته باشد");
   const out: { id: number | null; goodsItemId: number; productionOrderId: number | null; bomId: number; quantity: any; scrapQuantity: any; note: string | null; batch: LineBatch }[] = [];
   const seen = new Set<string>();
@@ -227,6 +236,8 @@ async function cleanStatLines(raw: any[], date: Date, keepBomIds: Set<number> = 
     if (!Number.isFinite(scrapRaw) || scrapRaw < 0) fail(`ردیف ${n}: مقدار ضایعات نامعتبر است`);
     let productionOrderId: number | null = null;
     let orderNumber: number | null = null;
+    if (basis === "PRODUCTION_ORDER" && !l?.productionOrderId) fail(`ردیف ${n}: در آمار «بر مبنای دستور تولید» انتخاب دستور تولید الزامی است`);
+    if (basis === "NO_BASIS" && l?.productionOrderId) fail(`ردیف ${n}: آمار «بدون مبنا» دستور تولید نمی‌گیرد؛ مبنا را «بر مبنای دستور تولید» کنید یا دستور را بردارید`);
     if (l?.productionOrderId) {
       const o = await prisma.productionOrder.findUnique({ where: { id: Number(l.productionOrderId) }, select: { id: true, number: true, status: true, date: true, outputItemId: true } });
       if (!o) return fail(`ردیف ${n}: دستور تولید یافت نشد`);
@@ -252,7 +263,8 @@ export async function createProductionStat(body: any, userId?: number | null) {
   await assertDateWithinCurrentFiscalPeriod(date);
   await assertProductionPeriodOpen(date);
   const cc = await loadCostCenter(body?.costCenterId, "مرکز هزینه");
-  const lines = await cleanStatLines(body?.lines, date);
+  const basis = parseBasis(body?.basis);
+  const lines = await cleanStatLines(body?.lines, date, basis);
   const fpId = await fiscalPeriodOf(date);
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${STAT_LOCK}::int, ${fpId}::int)`;
@@ -264,6 +276,7 @@ export async function createProductionStat(body: any, userId?: number | null) {
         fiscalPeriodId: fpId,
         date,
         costCenterId: cc.id,
+        basis,
         description: String(body?.description ?? "").trim() || null,
         createdById: userId ?? null,
         lines: { create: lines.map((l, i) => ({ goodsItemId: l.goodsItemId, productionOrderId: l.productionOrderId, bomId: l.bomId, batchId: batchIds[i], quantity: l.quantity, scrapQuantity: l.scrapQuantity, note: l.note })) },
@@ -283,7 +296,8 @@ export async function updateProductionStat(id: number, body: any) {
   await assertDateWithinCurrentFiscalPeriod(date);
   await assertProductionPeriodOpen(date);
   const cc = await loadCostCenter(body?.costCenterId, "مرکز هزینه");
-  const lines = await cleanStatLines(body?.lines, date, new Set(ex!.lines.map((l) => l.bomId)), new Map(ex!.lines.map((l) => [l.id, { goodsItemId: l.goodsItemId, batchId: l.batchId }])));
+  const basis = parseBasis(body?.basis);
+  const lines = await cleanStatLines(body?.lines, date, basis, new Set(ex!.lines.map((l) => l.bomId)), new Map(ex!.lines.map((l) => [l.id, { goodsItemId: l.goodsItemId, batchId: l.batchId }])));
   const fpId = await fiscalPeriodOf(date);
   if (fpId !== ex!.fiscalPeriodId) fail("تاریخ آمار نمی‌تواند به دوره‌ی مالی دیگری منتقل شود");
 
@@ -304,6 +318,7 @@ export async function updateProductionStat(id: number, body: any) {
   }
   if (usedIds.size) {
     if (cc.id !== ex!.costCenterId) fail("آمار دارای رسید یا تحویل است و مرکز هزینه‌اش قابل تغییر نیست");
+    if (basis !== ex!.basis) fail("آمار دارای رسید یا تحویل است و مبنایش قابل تغییر نیست");
     const recDates = await prisma.inventoryDocument.findMany({ where: { lines: { some: { sourceProductionStatLineId: { in: [...usedIds] } } } }, select: { date: true } });
     const delDates = await prisma.productionDelivery.findMany({ where: { lines: { some: { statLineId: { in: [...usedIds] } } } }, select: { date: true } });
     const earliest = [...recDates, ...delDates].map((d) => d.date.getTime()).sort((a, b) => a - b)[0];
@@ -320,7 +335,7 @@ export async function updateProductionStat(id: number, body: any) {
       if (l.id) await tx.productionStatLine.update({ where: { id: l.id }, data });
       else await tx.productionStatLine.create({ data: { ...data, statId: id } });
     }
-    await tx.productionStat.update({ where: { id }, data: { date, costCenterId: cc.id, description: String(body?.description ?? "").trim() || null } });
+    await tx.productionStat.update({ where: { id }, data: { date, costCenterId: cc.id, basis, description: String(body?.description ?? "").trim() || null } });
     await settleProductionBatches(tx, [...ex!.lines.map((e) => e.batchId), ...batchIds]);
     return tx.productionStat.findUniqueOrThrow({ where: { id }, include: STAT_INCLUDE });
   });

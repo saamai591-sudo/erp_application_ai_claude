@@ -241,7 +241,7 @@ function ReturnForm({ direction, editId }: { direction: Direction; editId?: numb
               />
             </div>
           </div>
-          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
+          <div className="je-header-grid cols-3" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(next) => setHeader({ ...header, description: next })} />
             </div>

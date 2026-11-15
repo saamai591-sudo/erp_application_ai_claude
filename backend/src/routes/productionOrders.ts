@@ -73,7 +73,8 @@ router.get("/production-orders/options", async (req, res) => {
   const where: any = { status: req.query.all === "1" ? { in: ["RELEASED", "CLOSED"] } : "RELEASED" };
   if (req.query.outputItemId) where.outputItemId = Number(req.query.outputItemId);
   const rows = await prisma.productionOrder.findMany({ where, include: { outputItem: { select: { id: true, fullCode: true, title: true } }, bom: { select: { number: true } } }, orderBy: [{ date: "desc" }, { number: "desc" }] });
-  res.json(rows.map((o) => ({ id: o.id, number: o.number, date: isoDay(o.date), outputItemId: o.outputItemId, outputItemCode: o.outputItem.fullCode, outputItemTitle: o.outputItem.title, quantity: num(o.quantity), status: o.status, bomId: o.bomId, bomNumber: o.bom?.number ?? null, kind: o.salesOrderLineId || o.salesQuoteLineId ? "CUSTOM" : "STOCK" })));
+  const { produced } = await orderQuantities(rows.map((r) => r.id));
+  res.json(rows.map((o) => ({ producedQuantity: produced.get(o.id) ?? 0, id: o.id, number: o.number, date: isoDay(o.date), outputItemId: o.outputItemId, outputItemCode: o.outputItem.fullCode, outputItemTitle: o.outputItem.title, quantity: num(o.quantity), status: o.status, bomId: o.bomId, bomNumber: o.bom?.number ?? null, kind: o.salesOrderLineId || o.salesQuoteLineId ? "CUSTOM" : "STOCK" })));
 });
 
 router.get("/production-orders/:id", can(`${FORM}.view`), async (req, res) => {

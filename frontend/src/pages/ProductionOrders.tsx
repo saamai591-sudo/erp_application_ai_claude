@@ -220,6 +220,8 @@ function OrderForm({ editId }: { editId?: number }) {
 
   const locked = meta.status === "CLOSED";
   const itemLocked = meta.status !== "DRAFT" && !!editId;
+  // تا وقتی اجزا هست کالای خروجی قابل تغییر نیست (اجزا مال همان کالایند)؛ برای تغییر، ابتدا اجزا حذف شوند
+  const hasLines = form.lines.length > 0;
   // بعد از «صدور»: فرمول و اجزا قفل‌اند (فقط مقدار دستور — با تغییر متناسب اجزا — و تاریخ‌های برنامه‌ای/توضیح قابل ویرایش‌اند)
   const structureLocked = meta.status === "RELEASED" && !!editId;
   const unitOf = (id: string) => goods.find((g) => g.id === Number(id))?.unit ?? "";
@@ -247,6 +249,31 @@ function OrderForm({ editId }: { editId?: number }) {
     } catch (e) {
       setError((e as ApiError).message);
     }
+  }
+
+  // تغییر کالای خروجی (فقط وقتی اجزا نیست؛ انتخابگر در غیر این صورت غیرفعال است): فرمول قبلی پاک و (اگر مقدار و فرمول فعالی هست) اجزا از فرمول کالای جدید ساخته می‌شود
+  async function changeOutputItem(newId: string, extra: Partial<FormState> = {}): Promise<boolean> {
+    if (newId === form.outputItemId) {
+      setForm((f) => ({ ...f, ...extra }));
+      return true;
+    }
+    const base = { ...form, outputItemId: newId, bomId: "", lines: [] as LineRow[], salesOrderLineId: "", salesQuoteLineId: "", sourceLabel: "", ...extra };
+    setForm(base);
+    if (Number(base.quantity) > 0 && base.date) {
+      try {
+        const b = await api.get(`/boms/active?itemId=${newId}&date=${base.date}`);
+        const out = Number(b.outputQuantity) || 1;
+        const qty = Number(base.quantity);
+        setForm((f) =>
+          f.outputItemId !== newId
+            ? f
+            : { ...f, bomId: String(b.id), lines: b.lines.map((l: any) => ({ componentItemId: String(l.componentItemId), quantity: String(Math.round(((qty * l.quantity) / out / (1 - l.scrapPercent / 100)) * 1e6) / 1e6), consumed: 0, note: l.note ?? "" })) }
+        );
+      } catch {
+        /* فرمولی برای کالای جدید نیست: هشدار bomWarning نشان داده می‌شود و اجزا خالی می‌ماند */
+      }
+    }
+    return true;
   }
 
   // تغییر فرمول: اگر اجزا از قبل هست، با تأیید از فرمول تازه دوباره ساخته می‌شوند
@@ -316,7 +343,7 @@ function OrderForm({ editId }: { editId?: number }) {
     extraActions.push({ label: "ایجاد سند مصرف از مانده‌ی اجزا", onClick: () => setConsumeOpen(true) });
     extraActions.push({ label: "بستن دستور", onClick: () => action("close", "دستور بسته شد") });
   }
-  if (editId && meta.status !== "CLOSED" && hasPermission("production.operations.production-orders.createChildren")) extraActions.push({ label: "ساخت دستورهای سطح پایین برای کسری", onClick: () => setChildrenOpen(true) });
+  if (editId && meta.status !== "CLOSED" && hasPermission("production.output.production-orders.createChildren")) extraActions.push({ label: "ساخت دستورهای سطح پایین برای کسری", onClick: () => setChildrenOpen(true) });
   if (editId && meta.status === "CLOSED") extraActions.push({ label: "بازکردن دستور", onClick: () => action("reopen", "دستور دوباره صادر شد") });
 
   return (
@@ -362,14 +389,16 @@ function OrderForm({ editId }: { editId?: number }) {
         )}
         {locked && <div className="card" style={{ padding: 8, marginBottom: 8 }}>دستور بسته شده است؛ برای ویرایش ابتدا آن را باز کنید.</div>}
         <fieldset disabled={locked} style={{ border: "none", padding: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6 }}>
             <div className="form-field">
               <label>تاریخ دستور<RequiredMark /></label>
               <JalaliDatePicker value={form.date} fiscalYear onChange={(v) => setForm({ ...form, date: v })} />
             </div>
             <div className="form-field">
               <label>کالای خروجی<RequiredMark /></label>
-              <GoodsItemPicker value={form.outputItemId} produced disabled={itemLocked} onChange={(g) => setForm({ ...form, outputItemId: String(g.id), bomId: "", salesOrderLineId: "", salesQuoteLineId: "", sourceLabel: "" })} />
+              <span title={hasLines && !itemLocked ? "اجزای دستور مربوط به همین کالاست؛ برای تغییر کالای خروجی ابتدا همه‌ی اجزا را حذف کنید" : undefined}>
+                <GoodsItemPicker value={form.outputItemId} produced disabled={itemLocked || hasLines} onChange={(g) => void changeOutputItem(String(g.id))} />
+              </span>
             </div>
             <div className="form-field">
               <label>فرمول ساخت</label>
@@ -387,8 +416,8 @@ function OrderForm({ editId }: { editId?: number }) {
               <label>پایان برنامه‌ای</label>
               <JalaliDatePicker value={form.plannedEnd} onChange={(v) => setForm({ ...form, plannedEnd: v })} />
             </div>
-            <div className="form-field full">
-              <label>اتصال به سفارش فروش / پیش‌فاکتور (دستور سفارشی)</label>
+            <div className="form-field span-2">
+              <label>سفارش فروش / پیش‌فاکتور</label>
               <RecordPickerField<SalesLine>
                 title="ردیف سفارش فروش / پیش‌فاکتور"
                 displayValue={form.sourceLabel}
@@ -403,10 +432,7 @@ function OrderForm({ editId }: { editId?: number }) {
                   { header: "مقدار", render: (s) => toFaDigits(String(s.quantity)), filterValue: (s) => String(s.quantity), width: "90px" },
                 ]}
                 onSelect={(s) =>
-                  setForm({
-                    ...form,
-                    outputItemId: String(s.goodsItemId),
-                    bomId: String(s.goodsItemId) === form.outputItemId ? form.bomId : "",
+                  void changeOutputItem(String(s.goodsItemId), {
                     salesOrderLineId: s.kind === "ORDER" ? String(s.lineId) : "",
                     salesQuoteLineId: s.kind === "QUOTE" ? String(s.lineId) : "",
                     sourceLabel: `${s.kind === "ORDER" ? "سفارش فروش" : "پیش‌فاکتور"} ${s.docNumber} — ${s.customer}`,

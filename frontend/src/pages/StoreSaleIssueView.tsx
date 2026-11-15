@@ -46,7 +46,7 @@ export default function StoreSaleIssueView({ kind }: { kind: "ISSUE" | "RETURN" 
         <>
           <div className="alert" style={{ marginBottom: 10 }}>این سند سیستمی است و با «تایید» تحویل فروش ساخته شده؛ ویرایش و حذف ندارد (برای حذف، تحویل فروش را «لغو تایید» کنید).</div>
           <fieldset disabled style={{ border: 0, padding: 0, margin: 0 }}>
-            <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
+            <div className="je-header-grid cols-3" style={{ marginBottom: 6, maxWidth: 900 }}>
               <div className="form-field"><label>شماره</label><input dir="ltr" value={toFaDigits(String(d.number))} disabled /></div>
               <div className="form-field"><label>تاریخ</label><input value={formatJalaliDate(d.date)} disabled /></div>
               <div className="form-field"><label>انبار</label><input value={d.warehouseTitle} disabled /></div>

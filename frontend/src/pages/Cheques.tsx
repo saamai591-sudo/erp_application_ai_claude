@@ -193,7 +193,7 @@ function ChequeDetail({ id }: { id: number }) {
       wide
     >
       <ErrorToast message={error} />
-      <div className="je-header-grid" style={{ maxWidth: 900 }}>
+      <div className="je-header-grid cols-3" style={{ maxWidth: 900 }}>
         <div className="form-field">
           <label>نوع</label>
           <input value={DIRECTION_FA[detail.direction]} disabled />

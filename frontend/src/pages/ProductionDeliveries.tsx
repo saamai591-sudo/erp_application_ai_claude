@@ -196,7 +196,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
     >
       <form id="delivery-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
-        <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
+        <div className="je-header-grid cols-3" style={{ marginBottom: 6, maxWidth: 900 }}>
           <div className="form-field">
             <label>تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={form.date} fiscalYear onChange={(v) => setForm({ ...form, date: v })} />

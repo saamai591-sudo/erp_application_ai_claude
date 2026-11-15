@@ -605,6 +605,7 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "تولید",
         items: [
+          { key: "production-orders", label: "دستور تولید", list: "/production-orders", create: "/production-orders/new", icon: "file" },
           { key: "production-stats", label: "آمار تولید", list: "/production-stats", create: "/production-stats/new", icon: "file" },
           { key: "production-deliveries", label: "تحویل تولید", list: "/production-deliveries", create: "/production-deliveries/new", icon: "file" },
         ],
@@ -612,7 +613,6 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "عملیات",
         items: [
-          { key: "production-orders", label: "دستور تولید", list: "/production-orders", create: "/production-orders/new", icon: "file" },
           { key: "wip-counts", label: "موجودی پای کار", list: "/wip-counts", create: "/wip-counts/new", icon: "file" },
           { key: "production-costing", label: "محاسبه بهای تمام‌شده تولید", list: "/production-costing", icon: "ledger", type: "operational" },
           { key: "mrp-runs", label: "برنامه‌ریزی نیاز مواد (MRP)", list: "/mrp-runs", create: "/mrp-runs/new", icon: "calendar" },

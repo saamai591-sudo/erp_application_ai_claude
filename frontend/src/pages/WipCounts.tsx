@@ -215,7 +215,7 @@ function WipForm({ editId }: { editId?: number }) {
         <ErrorToast message={error} />
         {meta.lockedReason && <div className="card" style={{ padding: 8, marginBottom: 8 }}>{meta.lockedReason}</div>}
         <fieldset disabled={readOnly} style={{ border: "none", padding: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
+          <div className="je-header-grid cols-3" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>دوره گزارشگری<RequiredMark /></label>
               <select value={form.reportingPeriodId} disabled={!!editId} onChange={(e) => setForm({ ...form, reportingPeriodId: e.target.value })}>

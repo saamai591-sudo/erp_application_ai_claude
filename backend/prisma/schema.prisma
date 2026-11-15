@@ -9341,12 +9341,19 @@ model ProductionCostJournalLine {
 }
 
 /// آمار تولید: مقدار تولیدشده‌ی هر مرکز هزینه در یک روز (مبنای رسید تولید و تحویل تولید و مخرج بهای تمام‌شده)
+enum ProductionStatBasis {
+  NO_BASIS
+  PRODUCTION_ORDER
+}
+
 model ProductionStat {
   id             Int                  @id @default(autoincrement())
   number         Int
   fiscalPeriodId Int
   date           DateTime             @db.Date
   costCenterId   Int
+  /// بدون مبنا (تولید روی انبار) یا بر مبنای دستور تولید (دستور هر ردیف الزامی)
+  basis          ProductionStatBasis  @default(NO_BASIS)
   description    String?
   createdById    Int?
   createdAt      DateTime             @default(now())

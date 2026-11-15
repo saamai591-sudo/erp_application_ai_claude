@@ -694,7 +694,7 @@ function OpeningForm({ editId }: { editId?: number }) {
         {lockedByCreation && <div className="opening-lock-note">{createBlockedReason}</div>}
 
         <fieldset disabled={formLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-        <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
+        <div className="je-header-grid cols-3" style={{ marginBottom: 6, maxWidth: 900 }}>
           <div className="form-field">
             <label>تاریخ افتتاحیه<RequiredMark /></label>
             <JalaliDatePicker fiscalYear value={date} onChange={setDate} />

@@ -626,14 +626,6 @@ export const REGISTRY: ModuleDef[] = [
         key: "output",
         title: "تولید",
         forms: [
-          { key: "production-stats", title: "آمار تولید", baseActions: CRUD },
-          { key: "production-deliveries", title: "تحویل تولید", baseActions: CRUD },
-        ],
-      },
-      {
-        key: "operations",
-        title: "عملیات",
-        forms: [
           {
             key: "production-orders",
             title: "دستور تولید",
@@ -646,6 +638,14 @@ export const REGISTRY: ModuleDef[] = [
               { key: "createChildren", title: "ساخت دستورهای سطح پایین برای کسری" },
             ],
           },
+          { key: "production-stats", title: "آمار تولید", baseActions: CRUD },
+          { key: "production-deliveries", title: "تحویل تولید", baseActions: CRUD },
+        ],
+      },
+      {
+        key: "operations",
+        title: "عملیات",
+        forms: [
           {
             key: "wip-counts",
             title: "موجودی پای کار",

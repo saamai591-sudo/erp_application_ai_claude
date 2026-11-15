@@ -187,6 +187,14 @@ export async function updateProductionOrder(id: number, body: any) {
   const { data, lines: cleaned } = await cleanOrder(body, ex!);
   if (ex!._count.documents > 0 && data.outputItemId !== ex!.outputItemId) fail("دستور سند انبار دارد و کالای خروجی‌اش قابل تغییر نیست");
 
+  // کنترل تغییر کالای خروجی (پیش‌نویس): اجزای ذخیره‌شده مال کالای قبلی‌اند؛ اگر دقیقاً همان‌ها دوباره فرستاده شوند یعنی کاربر کالا را عوض کرده و اجزا را نه
+  if (ex!.status === "DRAFT" && data.outputItemId !== ex!.outputItemId && Array.isArray(body?.lines) && body.lines.length > 0 && ex!.lines.length > 0) {
+    const sent = new Set<number>(body.lines.map((l: any) => Number(l?.componentItemId)));
+    if (sent.size === ex!.lines.length && ex!.lines.every((l) => sent.has(l.componentItemId))) {
+      fail("کالای خروجی عوض شده ولی اجزای قبلی (مربوط به کالای قبلی) مانده‌اند؛ اجزا را از فرمول کالای جدید بسازید یا خودتان اصلاح کنید");
+    }
+  }
+
   let lines = cleaned;
   if (ex!.status === "RELEASED") {
     // قفل بعد از صدور: فرمول و اجزا نباید عوض شوند (تغییرشان فقط با «برگشت به پیش‌نویس»)

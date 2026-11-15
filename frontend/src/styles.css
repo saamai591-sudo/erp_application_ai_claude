@@ -1267,8 +1267,9 @@ fieldset { min-width: 0; }
   font-family: inherit; font-size: 12px; box-sizing: border-box;
 }
 
-/* هدر سند حسابداری - شبکه سه‌ستونه فشرده */
-.je-header-grid { display: grid; grid-template-columns: 1fr 1fr 1.8fr; gap: 6px 20px; }
+/* هدر فرم‌های سند (هدر + آیتم) - شبکه‌ی چهارستونه‌ی فشرده؛ پیش‌فرض همه‌ی فرم‌های تازه. فرم‌های قدیمیِ چیده‌شده برای سه ستون کلاس cols-3 دارند */
+.je-header-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 20px; }
+.je-header-grid.cols-3 { grid-template-columns: 1fr 1fr 1.8fr; }
 .je-header-grid .form-field { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 /* آیتم‌های grid به‌طور پیش‌فرض min-width: auto دارند و از محتوایشان (برچسب + select) کوچک‌تر نمی‌شوند؛ در صفحه‌ی باریک ستون‌ها از قاب بیرون
    می‌زدند. اجازه‌ی کوچک‌شدن به خود فیلد و کنترل داخلش داده می‌شود. */
@@ -2146,7 +2147,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   .form-toolbar-left, .form-toolbar-right { gap: 2px; }
   .card { padding: 12px !important; }
 
-  .je-header-grid, .je-header-grid.cols-4 { grid-template-columns: 1fr; gap: 10px; }
+  .je-header-grid, .je-header-grid.cols-3, .je-header-grid.cols-4 { grid-template-columns: 1fr; gap: 10px; }
   .je-header-grid.cols-4 > * { grid-row: auto !important; grid-column: auto !important; }
   .je-header-grid .span-2 { grid-column: auto; }
   .je-header-grid .form-field { flex-direction: column; align-items: stretch; gap: 4px; }
