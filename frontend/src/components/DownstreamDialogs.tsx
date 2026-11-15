@@ -4,6 +4,7 @@ import { JalaliDatePicker } from "./JalaliDatePicker";
 import { RecordPickerField } from "./RecordPicker";
 import { AmountInput } from "./AmountInput";
 import { RequiredMark } from "./RequiredMark";
+import { WarehousePickerField } from "./WarehousePickerField";
 import { api } from "../lib/api";
 import { useTabs } from "../lib/TabsContext";
 import { stageFormPrefill } from "../lib/formPrefill";
@@ -61,6 +62,14 @@ export interface PurchaseInvoiceFromReceiptPrefill {
   fxRate: string;
 }
 
+export interface ReceiptFromStatPrefill {
+  statNumber: number;
+  costCenterId: number;
+  date: string;
+  warehouseId: number;
+}
+
+const NEW_PRODUCTION_RECEIPT_PATH = "/production-receipts/new";
 const NEW_DELIVERY_PATH = "/sales-deliveries/new";
 const NEW_INVOICE_PATH = "/sales-invoices/new";
 const NEW_ORDER_PATH = "/sales-orders/new";
@@ -655,6 +664,98 @@ function ReceiptToPurchaseInvoiceDialog({ sourceId, onClose }: { sourceId: numbe
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
+// آمار تولید ← رسید تولید (رسید انبار محصول)
+// ---------------------------------------------------------------------------------------------------------------------------
+
+interface StatInfo {
+  id: number;
+  number: number | null;
+  date: string;
+  costCenterId: number;
+  costCenterTitle: string;
+  status: "DRAFT" | "CONFIRMED";
+  lines: { id: number; remaining: number }[];
+}
+
+function StatToReceiptDialog({ sourceId, onClose }: { sourceId: number; onClose: () => void }) {
+  const { openTab } = useTabs();
+  const [info, setInfo] = useState<StatInfo | null>(null);
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [fp, setFp] = useState<FiscalPeriodRange | null>(null);
+  const [date, setDate] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.get(`/production-stats/${sourceId}`), api.get("/warehouses"), fetchSelectedFiscalPeriod()])
+      .then(([st, w, period]: [StatInfo, WarehouseOption[], FiscalPeriodRange | null]) => {
+        if (!alive) return;
+        setInfo(st);
+        setWarehouses(w.filter((x) => x.isActive));
+        setFp(period);
+        setDate(initialDate(period, st.date));
+      })
+      .catch((e) => {
+        showError(e.message);
+        onClose();
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceId]);
+
+  const open = info ? info.lines.filter((l) => l.remaining > 0).length : 0;
+  const reason = info ? (info.status !== "CONFIRMED" ? "فقط آمار تاییدشده رسید تولید می‌گیرد؛ ابتدا آمار را تایید کنید" : open === 0 ? "همه‌ی ردیف‌های این آمار رسید یا تحویل شده‌اند" : null) : null;
+
+  function confirm() {
+    if (!info || !info.number) return;
+    if (reason) return showError(reason);
+    if (!warehouseId) return showError("انبار الزامی است");
+    if (!date) return showError("تاریخ الزامی است");
+    if (date < info.date.slice(0, 10)) return showError("تاریخ رسید نمی‌تواند قبل از تاریخ آمار باشد");
+    const dateError = validateDocumentDate(date, fp);
+    if (dateError) return showError(dateError);
+    const prefill: ReceiptFromStatPrefill = { statNumber: info.number, costCenterId: info.costCenterId, date, warehouseId: Number(warehouseId) };
+    stageFormPrefill(NEW_PRODUCTION_RECEIPT_PATH, prefill);
+    openTab(NEW_PRODUCTION_RECEIPT_PATH);
+    onClose();
+  }
+
+  return (
+    <Modal title="صدور رسید تولید از آمار" onClose={onClose}>
+      {!info ? (
+        <p style={{ color: "var(--ink-soft)" }}>در حال بارگذاری…</p>
+      ) : (
+        <>
+          <p style={{ margin: "0 0 10px", fontSize: 13, lineHeight: 1.9 }}>
+            آمار تولید شماره {toFaDigits(String(info.number ?? ""))} — {formatJalaliDate(info.date)} — {info.costCenterTitle}
+            <br />
+            ردیف‌های دارای مانده‌ی رسید: <b>{toFaDigits(String(open))}</b>
+          </p>
+          {reason && <p style={{ color: "var(--danger, #c0392b)", fontSize: 13 }}>{reason}</p>}
+          <div className="form-grid">
+            <div className="form-field">
+              <label>انبار<RequiredMark /></label>
+              <WarehousePickerField warehouses={warehouses} value={warehouseId} onChange={setWarehouseId} disabled={!!reason} />
+            </div>
+            <div className="form-field">
+              <label>تاریخ رسید<RequiredMark /></label>
+              <JalaliDatePicker fiscalYear value={date} onChange={setDate} disabled={!!reason} />
+            </div>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "6px 0 0" }}>با تایید، فرم «رسید تولید جدید» با مبنای «آمار تولید» و ردیف‌های دارای مانده‌ی همین آمار باز می‌شود؛ مقدار هر ردیف را می‌توانید کم کنید و سند تا «ذخیره» ساخته نمی‌شود.</p>
+          <div className="actions">
+            <button type="button" className="btn" onClick={confirm} disabled={!!reason}>تایید</button>
+            <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
 // اقدام‌های هر فرم مبدأ (کلید مجوز = ایجاد فرم مقصد)
 // ---------------------------------------------------------------------------------------------------------------------------
 
@@ -673,4 +774,8 @@ export const DELIVERY_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
 
 export const RECEIPT_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
   { key: "purchase-invoice", label: "صدور فاکتور خرید", permission: "supply-chain.operations.purchase-invoices.create", Dialog: ReceiptToPurchaseInvoiceDialog },
+];
+
+export const STAT_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
+  { key: "production-receipt", label: "صدور رسید تولید", permission: "inventory.inbound-receipts.production-receipts.create", Dialog: StatToReceiptDialog },
 ];

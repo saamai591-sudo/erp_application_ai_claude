@@ -15,6 +15,8 @@ import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { takeFormPrefill } from "../lib/formPrefill";
+import { ReceiptFromStatPrefill } from "../components/DownstreamDialogs";
 import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -264,6 +266,26 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
       .then((lines: any[]) => setPickableStat(lines.map((l) => ({ ...l, id: l.lineId }))))
       .catch(() => setPickableStat([]));
   }, [statBasis, header.costCenterId, header.date, editId]);
+
+  // راهبری از آمار تولید: سرصفحه همین‌جا پر می‌شود؛ ردیف‌های آمار بعد از رسیدن فهرست ردیف‌های دارای مانده (effect بالا) با همان انتخابگر ردیف می‌نشینند
+  const [pendingStat, setPendingStat] = useState<number | null>(null);
+  const location = useLocation();
+  useEffect(() => {
+    if (!loaded || editId) return;
+    const p = takeFormPrefill<ReceiptFromStatPrefill>(location.pathname);
+    if (!p) return;
+    setHeader((h) => ({ ...h, basis: "PRODUCTION_STAT", date: p.date, warehouseId: String(p.warehouseId), costCenterId: String(p.costCenterId) }));
+    setPendingStat(p.statNumber);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+  useEffect(() => {
+    if (pendingStat === null || !statBasis || !pickableStat.length) return;
+    const mine = pickableStat.filter((s) => s.statNumber === pendingStat);
+    setPendingStat(null);
+    if (!mine.length) return setError("هیچ ردیف دارای مانده‌ای از این آمار باقی نمانده است");
+    onStatLinesPicked(0, mine);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStat, pickableStat]);
 
   // مانده‌ی زنده: مقدارِ سایر ردیف‌های همین سند که به همان ردیف آمار وصل‌اند کم می‌شود
   function liveRemaining(s: StatPick, exceptIdx: number) {

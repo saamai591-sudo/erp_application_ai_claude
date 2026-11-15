@@ -3,6 +3,8 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { DownstreamMenu } from "../components/DownstreamMenu";
+import { STAT_DOWNSTREAM_ACTIONS } from "../components/DownstreamDialogs";
 import { Modal } from "../components/Modal";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
@@ -274,6 +276,7 @@ function StatForm({ editId }: { editId?: number }) {
       onDelete={editId && !anyUsed && !locked ? handleDelete : undefined}
       extraActions={extraActions}
       saveDisabled={locked}
+      toolbarExtra={editId ? <DownstreamMenu actions={STAT_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={locked ? null : "فقط آمار تاییدشده رسید تولید می‌گیرد؛ ابتدا آمار را تایید کنید"} /> : undefined}
     >
       <form id="stat-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
