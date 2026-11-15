@@ -18,6 +18,7 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
 import { WAREHOUSE_DOC_TYPE_FA } from "../lib/warehouseDocTypes";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «قواعد تفصیل» (کالا و خدمت › تنظیمات): هدر = رکورد «حسابداری کالا و خدمت» + تاریخ اجرا + شرط‌های تفکیک (انبار / گروه کالا / طرف حساب)،
 // دیتیل = ردیف قاعده: مقدار شرط‌ها + منبع هر سطح تفصیلِ معین (ثابت، یا از سند انبار). هر ردیف یا همه‌ی شرط‌های انتخاب‌شده را پر دارد یا همه را خالی (ردیف «بقیه»).
@@ -302,10 +303,7 @@ function RuleForm({ editId }: { editId?: number }) {
                   <td>{toFaDigits(String(i + 1))}</td>
                   {flags.byWarehouse && (
                     <td>
-                      <select value={r.warehouseId} onChange={(e) => updateRow(i, { warehouseId: e.target.value })}>
-                        <option value="">— بقیه —</option>
-                        {warehouses.map((w) => <option key={w.id} value={w.id}>{w.title}</option>)}
-                      </select>
+                      <WarehousePickerField warehouses={warehouses} value={r.warehouseId} placeholder="— بقیه —" onChange={(id) => updateRow(i, { warehouseId: id })} onClear={() => updateRow(i, { warehouseId: "" })} />
                     </td>
                   )}
                   {flags.byGoodsGroup && (

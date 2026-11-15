@@ -24,6 +24,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { useTabs } from "../lib/TabsContext";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // تولید › عملیات › «دستور تولید»: هدف تولید یک کالای نیمه‌ساخته/محصول + اجزای لازم (از فرمول ساخت یا دستی). دستور مرتبط با ردیف سفارش فروش/پیش‌فاکتور = سفارشی،
 // وگرنه انباری. «آمار تولید» و اسناد مصرف/برگشت مصرف می‌توانند (اختیاری) به دستور «صادرشده» وصل شوند؛ بهای تمام‌شده در سطح مرکز هزینه محاسبه می‌شود و با همین اتصال به دستور منتسب می‌گردد. قواعد: backend/src/services/productionOrderService.ts
@@ -536,10 +537,7 @@ function ConsumptionDialog({ orderId, onClose, onDone }: { orderId: number; onCl
       <div className="form-grid">
         <div className="form-field">
           <label>انبار<RequiredMark /></label>
-          <select value={v.warehouseId} onChange={(e) => setV({ ...v, warehouseId: e.target.value })}>
-            <option value="">انتخاب کنید</option>
-            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.title}</option>)}
-          </select>
+          <WarehousePickerField warehouses={warehouses} value={v.warehouseId} onChange={(id) => setV({ ...v, warehouseId: id })} />
         </div>
         <div className="form-field">
           <label>مرکز هزینه<RequiredMark /></label>

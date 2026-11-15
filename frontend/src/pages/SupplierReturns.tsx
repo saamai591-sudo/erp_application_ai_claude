@@ -24,6 +24,7 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
 import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «برگشت به تامین‌کننده» — طبق stockAnalysis.md بند ۳۸؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/supplierReturns.ts. طرف مقابل (تامین‌کننده) در سطح سند الزامی است و باید با
@@ -310,12 +311,7 @@ function SupplierReturnForm({ editId, basePath }: { editId?: number; basePath: s
             </div>
             <div className="form-field">
               <label>انبار<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

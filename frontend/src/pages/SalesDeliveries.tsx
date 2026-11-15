@@ -30,6 +30,7 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
 import { partyDisplayName } from "../lib/partyDisplay";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «حواله فروش» (مجوز خروج از انبار برای فروش) — سند واقعی حرکت انبار، جدا از حواله انبار مصرفی
 // موجود؛ ساختارش دقیقاً مطابق الگوی «رسید انبار خرید» است (رجوع کنید به یادداشت بالای
@@ -485,12 +486,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
             </div>
             <div className="form-field">
               <label>انبار<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={headerDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={headerDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

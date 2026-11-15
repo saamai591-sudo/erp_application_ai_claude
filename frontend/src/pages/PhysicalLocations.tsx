@@ -7,6 +7,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { api, ApiError } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 interface WarehouseOption {
   id: number;
@@ -110,11 +111,7 @@ export default function PhysicalLocations() {
       </div>
       <div className="form-field" style={{ maxWidth: 320, marginBottom: 10 }}>
         <label>انبار</label>
-        <select value={warehouseId ?? ""} onChange={(e) => setWarehouseId(Number(e.target.value))}>
-          {warehouses.map((w) => (
-            <option key={w.id} value={w.id}>{w.title}</option>
-          ))}
-        </select>
+        <WarehousePickerField warehouses={warehouses} value={warehouseId ?? ""} onChange={(id) => setWarehouseId(Number(id))} />
       </div>
       <ErrorToast message={error} />
       {warehouseId && (

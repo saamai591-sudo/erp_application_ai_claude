@@ -27,6 +27,7 @@ import { PlusIcon } from "../components/icons";
 import { recomputeAmount } from "../lib/rowHelpers";
 import { GoodsPickerField } from "../components/GoodsPickerField";
 import { GoodsScope, cachedGoods, ensureGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «رسید تولید» — طبق stockAnalysis.md بند ۳۴/۴۲ («دریافت محصول»)؛ این پروژه ماژول «تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» و بدون طرف‌حساب است (نگاه کنید به یادداشت بالای
@@ -422,12 +423,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
             </div>
             <div className="form-field">
               <label>انبار<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

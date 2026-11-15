@@ -24,6 +24,7 @@ import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valu
 import { PlusIcon } from "../components/icons";
 import { GoodsPickerField } from "../components/GoodsPickerField";
 import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «کسری انبارگردانی» — طبق تصمیم صریح کاربر، سندی مستقل از «اضافات انبارگردانی» (که از این پس
 // فقط مازاد را می‌پذیرد): یک حواله‌ی خروج مستقیم و ساده، بدون مبنا، بدون هیچ مقایسه‌ای با موجودی
@@ -283,12 +284,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
             </div>
             <div className="form-field">
               <label>انبار<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

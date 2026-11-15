@@ -23,6 +23,7 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
 import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («رسید انتقال») طرف دریافت را پوشش
 // می‌دهد. هر ردیف باید به یک ردیف سند «حواله انتقالی» قطعی‌شده ارجاع بدهد که انبار مقصد اعلام‌شده‌ی آن
@@ -304,12 +305,7 @@ function WarehouseTransferInForm({ editId, basePath }: { editId?: number; basePa
             </div>
             <div className="form-field">
               <label>انبار مقصد<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={headerLocked}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={headerLocked} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

@@ -18,6 +18,7 @@ import { api, ApiError } from "../lib/api";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { PlusIcon } from "../components/icons";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «رسید موقت» و «برگشت رسید موقت» (انبار › رسید موقت): دو سند فقط تعدادی (بدون فی/مبلغ و بدون سند حسابداری).
 // رسید موقت کالا را به انبار قرنطینه/QC وارد می‌کند (مبنا: سفارش خرید یا مجوز تحویل)؛ برگشت رسید موقت حتماً بر
@@ -354,12 +355,7 @@ function TempDocForm({ kind, editId }: { kind: Kind; editId?: number }) {
             </div>
             <div className="form-field">
               <label>انبار{kind === "RECEIPT" ? " (قرنطینه/QC)" : ""}<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={headerDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={headerDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

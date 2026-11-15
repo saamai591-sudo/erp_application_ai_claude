@@ -25,6 +25,7 @@ import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valu
 import { PlusIcon } from "../components/icons";
 import { partyDisplayName } from "../lib/partyDisplay";
 import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «برگشت از فروش» — طبق stockAnalysis.md بند ۳۴؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/salesReturns.ts برای توضیح طراحی (سکوت مستند در این مورد، هم‌الگوی بند ۴۰). طبق
@@ -300,12 +301,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
             </div>
             <div className="form-field">
               <label>انبار<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

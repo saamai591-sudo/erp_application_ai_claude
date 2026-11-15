@@ -25,6 +25,7 @@ import { PlusIcon } from "../components/icons";
 import { recomputeAmount } from "../lib/rowHelpers";
 import { GoodsPickerField } from "../components/GoodsPickerField";
 import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «اضافات انبارگردانی» — طبق تصمیم صریح کاربر، دقیقاً هم‌الگوی موجودی اول دوره/رسید تولید:
 // بدون مقایسه با موجودی سیستمی؛ کاربر مستقیماً مقدار مازاد هر ردیف را وارد می‌کند (بدون مبنا). این سند
@@ -417,12 +418,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
             </div>
             <div className="form-field">
               <label>انبار<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

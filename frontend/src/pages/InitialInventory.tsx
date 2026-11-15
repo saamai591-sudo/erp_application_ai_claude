@@ -25,6 +25,7 @@ import { PlusIcon } from "../components/icons";
 import { recomputeAmount } from "../lib/rowHelpers";
 import { GoodsPickerField } from "../components/GoodsPickerField";
 import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد —
 // یک نمای واحد است که ستون‌های مبلغی بر اساس مجوز کاربر نمایش داده می‌شوند، نه بر اساس مسیر URL. دقیقاً
@@ -476,12 +477,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
           )}
           <div className="form-field">
             <label>انبار<RequiredMark /></label>
-            <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={nonMoneyReadOnly}>
-              <option value="">انتخاب کنید</option>
-              {warehouseOptions.map((w) => (
-                <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-              ))}
-            </select>
+            <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={nonMoneyReadOnly} />
           </div>
           <div className="form-field">
             <label>تاریخ سند<RequiredMark /></label>

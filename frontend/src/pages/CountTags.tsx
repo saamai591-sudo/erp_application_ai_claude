@@ -15,6 +15,7 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { fetchSelectedFiscalPeriod, defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // انبارگردانی › «تگ انبارگردانی»: «جدید» یک دیالوگ (روش، انبار، تاریخ) باز می‌کند و با «تایید» برای هر کالای دارای گردش در آن انبار
 // (از اول دوره مالی تا تاریخ) یک تگ با شماره‌ی سریالی صادر می‌شود. قواعد در سرور (routes/inventoryCounting.ts).
@@ -127,12 +128,7 @@ function NewIssue() {
         </div>
         <div className="form-field">
           <label>انبار<RequiredMark /></label>
-          <select value={form.warehouseId} onChange={(e) => setForm({ ...form, warehouseId: e.target.value })}>
-            <option value="">— انتخاب —</option>
-            {warehouses.filter((w) => w.isActive).map((w) => (
-              <option key={w.id} value={w.id}>{w.title}</option>
-            ))}
-          </select>
+          <WarehousePickerField warehouses={warehouses} value={form.warehouseId} onChange={(id) => setForm({ ...form, warehouseId: id })} />
         </div>
         <div className="form-field">
           <label>تاریخ انبارگردانی<RequiredMark /></label>

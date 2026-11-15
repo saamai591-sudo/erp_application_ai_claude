@@ -26,6 +26,7 @@ import { CostCenterPickerField } from "../components/TypePickerFields";
 import { PlusIcon } from "../components/icons";
 import { GoodsPickerField } from "../components/GoodsPickerField";
 import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «مصرف تولید» — طبق stockAnalysis.md بند ۳۴/۳۹/۴۲؛ این پروژه ماژول «تولید»/«دستور تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» است (نگاه کنید به یادداشت بالای backend/src/routes/productionConsumptions.ts).
@@ -299,12 +300,7 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
             </div>
             <div className="form-field">
               <label>انبار<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={warehouseOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>

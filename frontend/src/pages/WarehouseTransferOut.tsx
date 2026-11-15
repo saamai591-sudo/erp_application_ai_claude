@@ -23,6 +23,7 @@ import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valu
 import { PlusIcon } from "../components/icons";
 import { GoodsPickerField } from "../components/GoodsPickerField";
 import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
+import { WarehousePickerField } from "../components/WarehousePickerField";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («حواله انتقالی») فقط طرف ارسال (خروج از
 // انبار مبدا) را پوشش می‌دهد. با قطعی‌کردن این سند، فقط موجودی انبار مبدا کم می‌شود؛ کالا تا زمانی که
@@ -349,21 +350,11 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
             </div>
             <div className="form-field">
               <label>انبار مبدا<RequiredMark /></label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {sourceOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={sourceOptions} value={header.warehouseId} onChange={(id) => setHeader({ ...header, warehouseId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
               <label>انبار مقصد<RequiredMark /></label>
-              <select value={header.destWarehouseId} onChange={(e) => setHeader({ ...header, destWarehouseId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {destOptions.map((w) => (
-                  <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
-                ))}
-              </select>
+              <WarehousePickerField warehouses={destOptions} value={header.destWarehouseId} onChange={(id) => setHeader({ ...header, destWarehouseId: id })} disabled={coreDisabled} />
             </div>
             <DocDetailHeaderFields
               config={detailConfig}
