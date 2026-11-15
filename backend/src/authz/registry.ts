@@ -617,6 +617,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "cost-structure", title: "ساختار بهای تمام‌شده", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
           { key: "cost-collectors", title: "عامل جمع‌آوری هزینه‌ها", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
           { key: "cost-time-drivers", title: "مبناهای زمانی تسهیم", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
+          { key: "batch-number-patterns", title: "الگوی شماره‌گذاری بچ", baseActions: CRUD },
           { key: "production-time-sheets", title: "زمان‌بندی تولید", baseActions: CRUD, requiresFeature: "PRODUCTION_COSTING" },
 
           { key: "item-planning", title: "پارامترهای برنامه‌ریزی کالا", baseActions: CRUD, requiresFeature: "PRODUCTION_MRP" },

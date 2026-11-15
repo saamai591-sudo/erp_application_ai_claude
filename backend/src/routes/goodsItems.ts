@@ -5,6 +5,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { toEnglishDigits } from "../utils/digits";
+import { patternAllowed, resolvePatternId } from "../services/batchNumberPatternService";
 
 const FORM = findFormPrefix("goods-items");
 
@@ -244,8 +245,18 @@ interface ItemBody {
   taxItemId?: string | null;
   /** فقط برای خدمت: EXPENSE (هزینه) | INVENTORY_COST (بهای موجودی)؛ اگر نیاید، هنگام ثبت «هزینه» می‌شود */
   accountingTreatment?: "EXPENSE" | "INVENTORY_COST" | null;
+  /** الگوی شماره‌گذاری بچ تولیدی (فقط کالای بچ‌دارِ نیمه‌ساخته/محصول؛ در غیر این صورت نادیده گرفته می‌شود) */
+  batchPatternId?: number | null;
   isActive?: boolean;
   attributes?: AttrSelection[];
+}
+
+/** الگوی بچ فقط برای کالای بچ‌دارِ نیمه‌ساخته/محصول؛ در غیر این صورت (یا خالی) null — نامعتبر/ناموجود رد می‌شود */
+async function batchPatternFor(trackingMethod: string, accountingGroupId: number, raw: unknown): Promise<number | null> {
+  const id = await resolvePatternId(raw);
+  if (!id) return null;
+  const g = await prisma.accountingGroup.findUnique({ where: { id: accountingGroupId }, select: { goodsType: true } });
+  return patternAllowed(trackingMethod, g?.goodsType) ? id : null;
 }
 
 /** شناسه مالیاتی کالا/خدمت: خالی ⇒ null؛ وگرنه دقیقاً ۱۳ رقم (ارقام فارسی هم پذیرفته می‌شود) */
@@ -305,6 +316,7 @@ router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
     }
 
     await assertGroupMatchesKind(body.goodsGroupId, body.kind);
+    const batchPatternId = await batchPatternFor(body.kind === "GOODS" ? body.trackingMethod ?? "NONE" : "NONE", body.accountingGroupId, body.batchPatternId);
     const { leaf, codePrefix, titlePrefix, resolvedAttrs } = await computePrefixes(body.goodsGroupId, body.attributes ?? []);
     const serial = await resolveSerial(body.goodsGroupId, body.code, leaf.childCodeLength!);
     const fullCode = codePrefix + serial;
@@ -333,6 +345,7 @@ router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
         taxRate,
         taxItemId,
         accountingTreatment,
+        batchPatternId,
         isActive: body.isActive ?? true,
         attributeValues: { create: resolvedAttrs.map((a) => ({ attributeId: a.attributeId, itemId: a.itemId })) },
       },
@@ -410,6 +423,9 @@ router.put("/goods-items/:id", can(`${FORM}.edit`), async (req, res) => {
       accountingTreatment = body.accountingTreatment;
     }
 
+    const nextTracking = existing.kind === "GOODS" ? body.trackingMethod ?? existing.trackingMethod : "NONE";
+    const batchPatternId = await batchPatternFor(nextTracking, body.accountingGroupId ?? existing.accountingGroupId, body.batchPatternId === undefined ? existing.batchPatternId : body.batchPatternId);
+
     const reorderControl = existing.kind === "GOODS" ? body.reorderControl ?? existing.reorderControl : false;
     let reorderPoint: number | null = existing.reorderPoint ? existing.reorderPoint.toNumber() : null;
     if (reorderControl) {
@@ -455,6 +471,7 @@ router.put("/goods-items/:id", can(`${FORM}.edit`), async (req, res) => {
         taxRate,
         taxItemId,
         accountingTreatment,
+        batchPatternId,
         isActive: body.isActive ?? existing.isActive,
         ...(body.attributes !== undefined
           ? { attributeValues: { create: resolvedAttrs.map((a) => ({ attributeId: a.attributeId, itemId: a.itemId })) } }

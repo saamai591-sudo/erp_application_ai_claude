@@ -79,7 +79,14 @@ interface AccountingGroupRow {
   id: number;
   code: number;
   title: string;
+  goodsType?: string;
   isActive: boolean;
+}
+
+interface BatchPatternRow {
+  id: number;
+  title: string;
+  template: string;
 }
 
 interface ItemRow {
@@ -104,6 +111,7 @@ interface ItemRow {
   taxRate: string | null;
   taxItemId: string | null;
   accountingTreatment: "EXPENSE" | "INVENTORY_COST" | null;
+  batchPatternId: number | null;
   isActive: boolean;
   hasTransactions: boolean;
   goodsGroup: GroupRow;
@@ -304,6 +312,8 @@ const DEFAULT_FORM = {
   taxItemId: "",
   // فقط برای خدمت: هزینه (معین از تنظیم «خرید خدمت» همان خدمت) یا بهای موجودی (حتماً به رسید انبار وصل می‌شود)
   accountingTreatment: "EXPENSE" as "EXPENSE" | "INVENTORY_COST",
+  // الگوی شماره‌گذاری بچ تولیدی (فقط کالای بچ‌دارِ نیمه‌ساخته/محصول؛ خالی = قالب پیش‌فرض)
+  batchPatternId: "",
   isActive: true,
 };
 
@@ -312,6 +322,7 @@ type FormState = typeof DEFAULT_FORM;
 export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: number }) {
   // بدون ماژول «مدیریت موجودی و انبار» در لایسنس: نقطه سفارش، ردیابی (بچ/سریال)، محل فیزیکی و «بهای موجودی» خدمت نمایش داده نمی‌شوند
   const inventoryOn = useModuleEnabled("inventory");
+  const productionOn = useModuleEnabled("production");
   const navigate = useNavigate();
   const location = useLocation();
   const label = KIND_FA[kind];
@@ -324,6 +335,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
   const [attributes, setAttributes] = useState<AttributeRow[]>([]);
   const [units, setUnits] = useState<UnitRow[]>([]);
   const [accountingGroups, setAccountingGroups] = useState<AccountingGroupRow[]>([]);
+  const [batchPatterns, setBatchPatterns] = useState<BatchPatternRow[]>([]);
   const [form, setForm] = usePersistedState<FormState>(cacheKey, DEFAULT_FORM);
   const [attrRows, setAttrRows] = usePersistedState<AttrRowState[]>(attrCacheKey, []);
   const [tab, setTab] = useState<"main" | "attrs" | "inventory" | "accounting" | "tracking">("main");
@@ -345,6 +357,10 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
       setAccountingGroups(ag);
     });
   }, []);
+
+  useEffect(() => {
+    if (productionOn) api.get("/batch-number-patterns").then(setBatchPatterns).catch(() => setBatchPatterns([]));
+  }, [productionOn]);
 
   useEffect(() => {
     if (!editId) {
@@ -375,6 +391,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
         taxRate: item.taxRate ?? "",
         taxItemId: item.taxItemId ?? "",
         accountingTreatment: item.accountingTreatment ?? "EXPENSE",
+        batchPatternId: item.batchPatternId ? String(item.batchPatternId) : "",
         isActive: item.isActive,
       });
       setExistingHasTransactions(item.hasTransactions);
@@ -405,6 +422,8 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
   const selectedAccountingGroup = accountingGroups.find((a) => String(a.id) === form.accountingGroupId);
   // فقط گروه‌هایی که نوع ریشه‌شان با این فرم (کالا ⇄ PRODUCT، خدمت ⇄ SERVICE) یکی است
   const wantedGroupType = kind === "GOODS" ? "PRODUCT" : "SERVICE";
+  // الگوی بچ فقط وقتی معناست که کالا بچ‌دار و گروه حسابش «نیمه‌ساخته/محصول» باشد (ساخت بچ هنگام تایید آمار تولید)
+  const showBatchPattern = productionOn && kind === "GOODS" && form.trackingMethod === "BATCH" && (selectedAccountingGroup?.goodsType === "SEMI_FINISHED" || selectedAccountingGroup?.goodsType === "PRODUCT");
   const showWeightFields = kind === "GOODS" && selectedUnit && !selectedUnit.isWeight;
   const { codePreview, titlePreview } = computePreview(selectedGroup, groups, attrRows, form.code, form.title);
 
@@ -456,6 +475,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
       body.reorderPoint = form.reorderControl ? Number(form.reorderPoint) : null;
       body.trackingMethod = form.trackingMethod;
       body.isLocationTracked = form.isLocationTracked;
+      body.batchPatternId = showBatchPattern && form.batchPatternId ? Number(form.batchPatternId) : null;
     }
 
     try {
@@ -691,6 +711,20 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
                 <option value="SERIAL">سریال</option>
               </select>
             </div>
+            {showBatchPattern && (
+              <div className="form-field">
+                <label>الگوی شماره‌گذاری بچ</label>
+                <select value={form.batchPatternId} onChange={(e) => setForm({ ...form, batchPatternId: e.target.value })}>
+                  <option value="">پیش‌فرض ([P{"{ORDER}"}-]S{"{STAT}"}-{"{DATE}"})</option>
+                  {batchPatterns.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title} — {p.template}
+                    </option>
+                  ))}
+                </select>
+                <small>شماره‌ی بچ هنگام «تایید آمار تولید» با این الگو ساخته می‌شود.</small>
+              </div>
+            )}
             <div className="form-field">
               <label className="checkbox-row">
                 <input type="checkbox" checked={form.isLocationTracked} onChange={(e) => setForm({ ...form, isLocationTracked: e.target.checked })} />

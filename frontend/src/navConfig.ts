@@ -598,6 +598,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "cost-structure", label: "ساختار بهای تمام‌شده", list: "/cost-structure", icon: "tree", type: "operational" },
           { key: "cost-collectors", label: "عامل جمع‌آوری هزینه‌ها", list: "/cost-collectors", create: "/cost-collectors/new", icon: "layers" },
           { key: "cost-time-drivers", label: "مبناهای زمانی تسهیم", list: "/cost-time-drivers", create: "/cost-time-drivers/new", icon: "clock" },
+          { key: "batch-number-patterns", label: "الگوی شماره‌گذاری بچ", list: "/batch-number-patterns", create: "/batch-number-patterns/new", icon: "tag" },
           { key: "production-time-sheets", label: "زمان‌بندی تولید", list: "/production-time-sheets", create: "/production-time-sheets/new", icon: "calendar" },
           { key: "item-planning", label: "پارامترهای برنامه‌ریزی کالا", list: "/item-planning", create: "/item-planning/new", icon: "sliders" },
         ],

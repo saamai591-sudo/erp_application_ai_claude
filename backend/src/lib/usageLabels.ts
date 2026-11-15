@@ -160,6 +160,7 @@ export const USAGE_META: Record<string, UsageMeta> = {
   ProductionDelivery: { label: "تحویل تولید", base: "/production-deliveries" },
   CostStructureNode: { label: "شاخه‌ی ساختار بهای تمام‌شده", base: "/cost-structure" },
   CostAccountRule: { label: "قاعده‌ی عامل جمع‌آوری معین", base: "/cost-collectors" },
+  BatchNumberPattern: { label: "الگوی شماره‌گذاری بچ", base: "/batch-number-patterns" },
   CostTimeDriver: { label: "مبنای زمانی تسهیم", base: "/cost-time-drivers" },
   ProductionTimeSheet: { label: "برگه‌ی زمان‌بندی تولید", base: "/production-time-sheets" },
   ProductionTimeLine: { label: "برگه‌ی زمان‌بندی تولید", base: "/production-time-sheets" },

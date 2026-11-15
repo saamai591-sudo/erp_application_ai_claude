@@ -4,7 +4,7 @@ import { D, fail, isProducedType, isoDay, num, parseDay, positive } from "./prod
 import { assertProductionPeriodOpen } from "./productionDocService";
 import { assertLineBom } from "./bomService";
 import { createBatch } from "./batchService";
-import { toJalaliCompact } from "../utils/jalaliDate";
+import { generateProductionBatchNumber } from "./batchNumberPatternService";
 import type { Db } from "../lib/prisma";
 
 // «آمار تولید» (مقدار تولیدشده‌ی هر مرکز هزینه) و «تحویل تولید» (انتقال تولید یک مرکز به مرکز بعد).
@@ -141,20 +141,6 @@ export function statShape(s: any, usage?: Map<number, StatLineUsage>) {
   };
 }
 
-/**
- * شماره‌ی پیش‌فرض بچ تولیدی (بدون الگوی تعریف‌شده): «P<دستور>-S<آمار>-<تاریخ شمسی ۸ رقمی>» با دستور و «S<آمار>-<تاریخ>» بدون دستور.
- * شماره‌ی آمار در هر دوره‌ی مالی یکتاست و تاریخ سال را دارد، پس بدون شمارنده یکتاست؛ فقط اگر برای همین کالا از قبل وجود داشت (مثلاً دو ردیف هم‌کالا در یک آمار) پسوند «-۲»، «-۳» … می‌گیرد.
- */
-async function productionBatchNumber(tx: Db, goodsItemId: number, orderNumber: number | null, statNumber: number, date: Date): Promise<string> {
-  const base = `${orderNumber ? `P${orderNumber}-` : ""}S${statNumber}-${toJalaliCompact(date)}`;
-  let candidate = base;
-  for (let n = 2; ; n++) {
-    // eslint-disable-next-line no-await-in-loop
-    if (!(await tx.batch.findUnique({ where: { goodsItemId_batchNumber: { goodsItemId, batchNumber: candidate } }, select: { id: true } }))) return candidate;
-    candidate = `${base}-${n}`;
-  }
-}
-
 /** تاریخ تولید بچ تولیدیِ هنوز بی‌گردش = تاریخ اولین آمار آن؛ و حذف بچ تولیدیِ بی‌ردیف و بی‌گردش (وقتی آمارش حذف یا جابه‌جا شد) */
 async function settleProductionBatches(tx: Db, batchIds: (number | null)[]) {
   for (const id of new Set(batchIds.filter((x): x is number => !!x))) {
@@ -283,7 +269,7 @@ export async function deleteProductionStat(id: number) {
  * ردیف به بچ موجود وصل می‌شود (merges: [{ lineId, batchId }]؛ تفکیک آمارها در آن بچ از بین می‌رود). همه‌چیز در یک تراکنش است و بعد از تایید آمار قفل می‌شود.
  */
 export async function confirmProductionStat(id: number, body: any, userId?: number | null) {
-  const ex = await prisma.productionStat.findUnique({ where: { id }, include: { lines: { include: { goodsItem: { select: { id: true, title: true, trackingMethod: true } }, productionOrder: { select: { id: true, number: true } } }, orderBy: { id: "asc" } } } });
+  const ex = await prisma.productionStat.findUnique({ where: { id }, include: { lines: { include: { goodsItem: { select: { id: true, title: true, fullCode: true, trackingMethod: true, batchPatternId: true } }, productionOrder: { select: { id: true, number: true } } }, orderBy: { id: "asc" } } } });
   if (!ex) return fail("آمار تولید یافت نشد");
   if (ex!.status !== "DRAFT") fail("این آمار قبلاً تایید شده است");
   await assertDateWithinCurrentFiscalPeriod(ex!.date);
@@ -313,7 +299,7 @@ export async function confirmProductionStat(id: number, body: any, userId?: numb
         batchId = b!.id;
       } else {
         await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(${BATCH_LOCK}::int, ${l.goodsItemId}::int)`;
-        const batchNumber = await productionBatchNumber(tx, l.goodsItemId, l.productionOrder?.number ?? null, ex!.number, ex!.date);
+        const batchNumber = await generateProductionBatchNumber(tx, { goodsItemId: l.goodsItemId, itemCode: l.goodsItem.fullCode, patternId: l.goodsItem.batchPatternId, orderNumber: l.productionOrder?.number ?? null, statNumber: ex!.number, date: ex!.date, fiscalPeriodId: ex!.fiscalPeriodId });
         const b = await createBatch({ goodsItemId: l.goodsItemId, batchNumber, productionDate: isoDay(ex!.date), sourceType: "PRODUCTION", productionOrderId: l.productionOrderId, description: `ساخته‌شده هنگام تایید آمار تولید شماره ${ex!.number}` }, tx);
         batchId = b.id;
       }

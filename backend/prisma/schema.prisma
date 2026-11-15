@@ -1248,6 +1248,9 @@ model GoodsItem {
   taxItemId                  String?
   /// «نحوه حسابداری» خدمت (فقط برای kind=SERVICE؛ برای کالا null): هزینه (حساب از تنظیم «خرید خدمت» همان خدمت) یا بهای موجودی (حتماً به رسید انبار وصل می‌شود)
   accountingTreatment        ServiceAccountingTreatment?
+  /// الگوی شماره‌گذاری بچ تولیدی (فقط کالای بچ‌دارِ نیمه‌ساخته/محصول؛ خالی = قالب پیش‌فرض)
+  batchPatternId             Int?
+  batchPattern               BatchNumberPattern?             @relation(fields: [batchPatternId], references: [id], onDelete: Restrict)
   isActive                   Boolean                         @default(true)
   hasTransactions            Boolean                         @default(false)
   createdAt                  DateTime                        @default(now())
@@ -1303,6 +1306,37 @@ model GoodsItemAttributeValue {
   item        GoodsAttributeItem @relation(fields: [itemId], references: [id])
 
   @@unique([goodsItemId, attributeId])
+}
+
+enum BatchSeqScope {
+  ALL
+  ITEM
+  FISCAL_YEAR
+  ITEM_FISCAL_YEAR
+}
+
+/// الگوی شماره‌گذاری بچ تولیدی: قالب با نشانه‌های {ORDER} {STAT} {DATE} {YEAR} {MONTH} {DAY} {ITEM} {SEQ} و گروه اختیاری […]
+model BatchNumberPattern {
+  id         Int                  @id @default(autoincrement())
+  code       Int                  @unique
+  title      String               @unique
+  template   String
+  seqScope   BatchSeqScope        @default(ALL)
+  seqWidth   Int                  @default(1)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @default(now()) @updatedAt
+  goodsItems GoodsItem[]
+  counters   BatchNumberCounter[]
+}
+
+model BatchNumberCounter {
+  id         Int                @id @default(autoincrement())
+  patternId  Int
+  scopeKey   String
+  lastNumber Int                @default(0)
+  pattern    BatchNumberPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+
+  @@unique([patternId, scopeKey])
 }
 
 // بچ — طبق stockAnalysis.md بند ۱۰-۱۶: Master مستقل و مشترک در کل ERP، نه رشته‌ی آزاد در سطر سند.

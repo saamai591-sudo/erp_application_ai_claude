@@ -136,6 +136,7 @@ import Boms from "./pages/Boms";
 import CostStructure from "./pages/CostStructure";
 import CostCollectors from "./pages/CostCollectors";
 import CostTimeDrivers from "./pages/CostTimeDrivers";
+import BatchNumberPatterns from "./pages/BatchNumberPatterns";
 import ProductionTimeSheets from "./pages/ProductionTimeSheets";
 import ItemPlanning from "./pages/ItemPlanning";
 import ProductionOrders from "./pages/ProductionOrders";
@@ -848,6 +849,9 @@ export default function App() {
             <Route path="/cost-time-drivers" element={<CostTimeDrivers />} />
             <Route path="/cost-time-drivers/new" element={<CostTimeDrivers />} />
             <Route path="/cost-time-drivers/:id/edit" element={<CostTimeDrivers />} />
+            {["/batch-number-patterns", "/batch-number-patterns/new", "/batch-number-patterns/:id/edit"].map((p) => (
+              <Route key={p} path={p} element={<BatchNumberPatterns />} />
+            ))}
             <Route path="/production-time-sheets" element={<ProductionTimeSheets />} />
             <Route path="/production-time-sheets/new" element={<ProductionTimeSheets />} />
             <Route path="/production-time-sheets/:id/edit" element={<ProductionTimeSheets />} />
