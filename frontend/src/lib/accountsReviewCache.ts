@@ -31,6 +31,9 @@ export interface AccountsReviewSnapshot {
   detailTotal: Record<number, number>;
   ledgerRows: any[];
   ledgerPageSize: number;
+  /** صفحه‌ی جاری و تعداد کل رکوردهای تب «گردش» — تا بعد از بازگشت از یک سند، همان صفحه نمایش داده شود */
+  ledgerPage?: number;
+  ledgerTotal?: number;
   /** مرتب‌سازی/فیلتر ستونی تب «گردش» — سمت سرور اعمال می‌شود، دقیقاً مثل تب‌های تفصیل */
   ledgerSort: { header: string; dir: "asc" | "desc" } | null;
   ledgerFilters: Record<string, ActiveFilter>;

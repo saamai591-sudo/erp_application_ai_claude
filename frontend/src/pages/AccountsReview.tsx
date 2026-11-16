@@ -181,9 +181,9 @@ export default function AccountsReview({ fx = false }: { fx?: boolean } = {}) {
   const [tabData, setTabData] = useState<Record<number, BalanceRow[]>>(snapshot?.tabData ?? {});
   const tabLoader = useReviewTabLoader(snapshot?.loadedTabs ?? []);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>(snapshot?.ledgerRows ?? []);
-  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerPage, setLedgerPage] = useState(snapshot?.ledgerPage ?? 1);
   const [ledgerPageSize, setLedgerPageSize] = useState(snapshot?.ledgerPageSize ?? 25);
-  const [ledgerTotal, setLedgerTotal] = useState(0);
+  const [ledgerTotal, setLedgerTotal] = useState(snapshot?.ledgerTotal ?? 0);
   const [, setLedgerTotalPages] = useState(1);
   const [detailQuery, setDetailQuery] = useState<Record<number, DetailQueryState>>(snapshot?.detailQuery ?? {});
   const [detailTotal, setDetailTotal] = useState<Record<number, number>>(snapshot?.detailTotal ?? {});
@@ -219,9 +219,11 @@ export default function AccountsReview({ fx = false }: { fx?: boolean } = {}) {
   const activeDetailSlots = DETAIL_SLOTS.filter((s) => s <= detailLevels);
 
   const [, setPeriods] = useState<FiscalPeriodRange[]>([]);
+  // فقط بعد از رسیدن سطح‌ها: تا آن موقع levels خالی است و ledgerTabIndex کوچک‌تر از مقدار واقعی؛ بدون این شرط،
+  // بازگشت به گزارش (مثلاً بعد از بستن یک سند) تب «گردش» ذخیره‌شده را به یک تب دیگر می‌پراند
   useEffect(() => {
-    if (activeTab > ledgerTabIndex) setActiveTab(ledgerTabIndex);
-  }, [activeTab, ledgerTabIndex]);
+    if (levels.length > 0 && activeTab > ledgerTabIndex) setActiveTab(ledgerTabIndex);
+  }, [levels.length, activeTab, ledgerTabIndex]);
   const chain = useChainedMultiSelect(snapshot?.chainState);
   const tabView = useReviewTabViewState(activeTab, snapshot?.balanceViewState ?? {});
 
@@ -239,12 +241,14 @@ export default function AccountsReview({ fx = false }: { fx?: boolean } = {}) {
       detailQuery,
       detailTotal,
       ledgerRows,
+      ledgerPage,
+      ledgerTotal,
       ledgerPageSize,
       ledgerSort,
       ledgerFilters,
       loadedTabs: Array.from(tabLoader.loadedTabs),
     });
-  }, [chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, detailQuery, detailTotal, ledgerRows, ledgerPageSize, ledgerSort, ledgerFilters, tabLoader.loadedTabs]);
+  }, [chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, detailQuery, detailTotal, ledgerRows, ledgerPage, ledgerTotal, ledgerPageSize, ledgerSort, ledgerFilters, tabLoader.loadedTabs]);
 
   useEffect(() => {
     async function init() {

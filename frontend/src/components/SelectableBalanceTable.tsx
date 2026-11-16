@@ -522,6 +522,9 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
             </select>
           </label>
           <div className="grid-page-nav">
+            <button type="button" className="btn secondary" disabled={serverPaging.page <= 1} onClick={() => serverPaging.onPageChange(1)}>
+              اولین
+            </button>
             <button type="button" className="btn secondary" disabled={serverPaging.page <= 1} onClick={() => serverPaging.onPageChange(serverPaging.page - 1)}>
               قبلی
             </button>
@@ -530,6 +533,9 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
             </span>
             <button type="button" className="btn secondary" disabled={serverPaging.page >= totalPages} onClick={() => serverPaging.onPageChange(serverPaging.page + 1)}>
               بعدی
+            </button>
+            <button type="button" className="btn secondary" disabled={serverPaging.page >= totalPages} onClick={() => serverPaging.onPageChange(totalPages)}>
+              آخرین
             </button>
           </div>
         </div>
