@@ -16,7 +16,7 @@ import { createWarehouseAdjustment } from "../routes/warehouseAdjustments";
 import { createInventoryCountingShortage } from "../routes/inventoryCountingShortages";
 import { createSalesQuote } from "../routes/salesOperations";
 import { createStoreSale } from "../services/storeSaleService";
-import { runWithRequestContext } from "../lib/requestContext";
+import { runWithRequestContext, withoutFiscalPeriodScope } from "../lib/requestContext";
 import { userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { isPriceListUsed } from "../services/salesPriceService";
@@ -1491,7 +1491,8 @@ export function registerAllImportProcessors() {
 
   // «فروش فروشگاهی» — هر ردیف اکسل یک ردیف کالا/خدمت؛ ردیف‌های هم‌«کلید فاکتور»+هم‌تاریخ یک فروش می‌شوند. شماره‌ی فروش خودکار (آخرین شماره‌ی دوره + ۱) است و
   // «کلید فاکتور» فقط برای گروه‌بندی ردیف‌هاست. همه‌ی قواعد (شیفت و تاریخ، ایستگاه فعال، فی اعلامیه‌ی ایستگاه، ارزش افزوده، موجودی منفی، قفل تحویل)
-  // همان createStoreSale فرم است. فی خالی = فی اعلامیه؛ فیِ متفاوت فقط با مجوز «تغییر فی». ثبت‌کننده‌ی فروش = کاربرِ واردکننده. دریافت‌ها وارد نمی‌شوند.
+  // همان createStoreSale فرم است. ردیفِ دارای «مبلغ»: فی و مبلغ عیناً از فایل (مهاجرت از سیستم قبلی؛ بدون نیاز به اعلامیه‌ی قیمت، فیِ خالی = مبلغ ÷ مقدار)؛
+  // ردیفِ بدون مبلغ: فی خالی = فی اعلامیه و فیِ متفاوت فقط با مجوز «تغییر فی». ثبت‌کننده‌ی فروش = کاربرِ واردکننده. دریافت‌ها وارد نمی‌شوند.
   registerImportEntity("store-sale", {
     groupByKey: (row) => `${(row.invoiceKey || "").trim()}__${row.date || ""}`,
     group: async (groupRows, ctx) => {
@@ -1524,7 +1525,7 @@ export function registerAllImportProcessors() {
           if (!same) return { ok: false, error: `ردیف ${i + 1} از فروش «${first.invoiceKey}»: شیفت، تاریخ شروع شیفت و مشتری همه‌ی ردیف‌های یک فروش باید یکسان باشد` };
         }
 
-        const lines: { goodsItemId: number; quantity: number; unitPrice?: number | null; description?: string | null }[] = [];
+        const lines: { goodsItemId: number; quantity: number; unitPrice?: number | null; amount?: number | null; vatAmount?: number | null; description?: string | null }[] = [];
         for (const [idx, row] of groupRows.entries()) {
           const resolvedItem = await resolveGoodsItemByCode(row, idx);
           if ("error" in resolvedItem) return { ok: false, error: resolvedItem.error };
@@ -1533,21 +1534,29 @@ export function registerAllImportProcessors() {
           const rawPrice = toEnglishDigits(row.unitPrice || "").replace(/,/g, "").trim();
           const unitPrice = rawPrice === "" ? null : Number(rawPrice);
           if (unitPrice !== null && !(unitPrice >= 0)) return { ok: false, error: `ردیف ${idx + 1}: فی نامعتبر است` };
-          lines.push({ goodsItemId: resolvedItem.item.id, quantity, unitPrice, description: row.lineDescription || null });
+          const rawAmount = toEnglishDigits(row.amount || "").replace(/,/g, "").trim();
+          const amount = rawAmount === "" ? null : Number(rawAmount);
+          if (amount !== null && !(amount >= 0)) return { ok: false, error: `ردیف ${idx + 1}: مبلغ نامعتبر است` };
+          const rawVat = toEnglishDigits(row.vatAmount || "").replace(/,/g, "").trim();
+          const vatAmount = rawVat === "" ? null : Number(rawVat);
+          if (vatAmount !== null && !(vatAmount >= 0)) return { ok: false, error: `ردیف ${idx + 1}: ارزش افزوده نامعتبر است` };
+          if (vatAmount !== null && amount === null) return { ok: false, error: `ردیف ${idx + 1}: ارزش افزوده فقط همراه «مبلغ» پذیرفته می‌شود` };
+          lines.push({ goodsItemId: resolvedItem.item.id, quantity, unitPrice, amount, vatAmount, description: row.lineDescription || null });
         }
 
         // تکراری: فروشی با همین شیفت، تاریخ و اقلام (کالا + مقدار) از قبل هست (ورود دوباره‌ی همان فایل)
         if (!ctx.allowDuplicates) {
           const sig = (ls: { goodsItemId: number; quantity: any }[]) => ls.map((l) => `${l.goodsItemId}:${Number(l.quantity)}`).sort().join("|");
-          const existing = await prisma.storeSale.findMany({ where: { shiftId: shift.id, date: new Date(`${date}T00:00:00.000Z`) }, include: { lines: { select: { goodsItemId: true, quantity: true } } } });
+          const existing = await withoutFiscalPeriodScope(() => prisma.storeSale.findMany({ where: { shiftId: shift.id, date: new Date(`${date}T00:00:00.000Z`) }, include: { lines: { select: { goodsItemId: true, quantity: true } } } }));
           const want = sig(lines);
           const dup = existing.find((s) => sig(s.lines) === want);
           if (dup) return { ok: false, error: `فروشی با همین شیفت، تاریخ و اقلام از قبل ثبت شده است (شماره ${dup.number})` };
         }
 
         const allowPriceChange = ctx.userId ? await userHasAction(ctx.userId, `${findFormPrefix("store-sales")}.changePrice`) : false;
-        await runWithRequestContext({ userId: ctx.userId ?? undefined }, () =>
-          createStoreSale({ date, shiftId: shift.id, shiftDate, customerId, description: first.description || undefined, lines }, allowPriceChange)
+        // bypassFiscalScope: همه‌ی سال‌های مالی در یک فایل (تاریخ هر ردیف دوره‌ی مالی خودش را تعیین می‌کند؛ شماره‌ی فروش در هر دوره جداست)
+        await runWithRequestContext({ userId: ctx.userId ?? undefined, bypassFiscalScope: true }, () =>
+          createStoreSale({ date, shiftId: shift.id, shiftDate, customerId, description: first.description || undefined, lines }, allowPriceChange, { explicitAmounts: true })
         );
         return { ok: true };
       } catch (e: any) {

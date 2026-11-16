@@ -31,6 +31,10 @@ export interface StoreSaleLineInput {
   description?: string | null;
   /** بارکد خوانده‌شده؛ اگر «تفسیر بارکد» مبلغ (فی) داشته باشد، فیِ ردیف از همان می‌آید و بر فی اعلامیه مقدم است */
   barcode?: string | null;
+  /** مبلغ ردیف (فقط ورود از اکسل؛ در فرم/API عادی نادیده گرفته می‌شود): فی و مبلغ عیناً از فایل می‌آید و به اعلامیه‌ی قیمت نیازی نیست */
+  amount?: number | null;
+  /** ارزش افزوده‌ی ردیف (فقط ورود از اکسل، همراه «مبلغ»): عیناً از فایل؛ خالی = طبق نرخ کالا محاسبه می‌شود */
+  vatAmount?: number | null;
 }
 export interface StoreSaleBody {
   date?: string;
@@ -118,23 +122,28 @@ export interface CleanLine {
   unitPrice: number;
   amount: number;
   vatAmount: number;
-  priceListId: number;
-  listPrice: number;
+  priceListId: number | null;
+  listPrice: number | null;
   description: string | null;
   barcode: string | null;
 }
 
-/** اعتبارسنجی و محاسبه‌ی ردیف‌ها (فی، مبلغ، ارزش افزوده) — مشترک ثبت و ویرایش */
-export async function cleanLines(lines: StoreSaleLineInput[] | undefined, station: Station, date: Date, allowPriceChange: boolean): Promise<CleanLine[]> {
+/**
+ * اعتبارسنجی و محاسبه‌ی ردیف‌ها (فی، مبلغ، ارزش افزوده) — مشترک ثبت و ویرایش.
+ * explicitAmounts (فقط ورود از اکسل): ردیفی که «مبلغ» دارد فی و مبلغش عیناً از فایل می‌آید (مثل سیستم قبلی)، بدون نیاز به اعلامیه‌ی قیمت و
+ * بدون کنترل «فی اعلامیه»؛ مثل هر فیِ متفاوت، مجوز «تغییر فی» لازم است.
+ */
+export async function cleanLines(lines: StoreSaleLineInput[] | undefined, station: Station, date: Date, allowPriceChange: boolean, explicitAmounts = false): Promise<CleanLine[]> {
   if (!Array.isArray(lines) || lines.length === 0) throw new StoreSaleError("فروش باید حداقل یک ردیف داشته باشد");
   const currency = await baseCurrency();
   const dp = currency.decimalPlaces;
+  const isExplicit = (l: StoreSaleLineInput) => explicitAmounts && l.amount !== undefined && l.amount !== null;
   const priceListId = await findEffectiveStationPriceListId({ stationId: station.id, currencyId: currency.id, date });
-  if (!priceListId) throw new StoreSaleError(`برای ایستگاه «${station.title}» در تاریخ ${displayDate(date)} اعلامیه‌ی قیمتی تعریف نشده است`);
+  if (!priceListId && !lines.every(isExplicit)) throw new StoreSaleError(`برای ایستگاه «${station.title}» در تاریخ ${displayDate(date)} اعلامیه‌ی قیمتی تعریف نشده است`);
   const ids = [...new Set(lines.map((l) => Number(l.goodsItemId)).filter((x) => x > 0))];
   const [items, pricing, defaultVat] = await Promise.all([
     prisma.goodsItem.findMany({ where: { id: { in: ids } } }),
-    loadItemPricing(priceListId, ids, dp),
+    priceListId ? loadItemPricing(priceListId, ids, dp) : Promise.resolve(new Map<number, any>()),
     getVatRatePercentForDate(date),
   ]);
   const byId = new Map(items.map((i) => [i.id, i]));
@@ -147,6 +156,26 @@ export async function cleanLines(lines: StoreSaleLineInput[] | undefined, statio
     if (!kindAllowed(station.offering, item.kind)) throw new StoreSaleError(`ایستگاه «${station.title}» ${station.offering === "GOODS" ? "فقط کالا" : "فقط خدمت"} ارائه می‌کند؛ «${item.title}» (${row}) قابل فروش نیست`);
     const quantity = Number(l.quantity);
     if (!(quantity > 0)) throw new StoreSaleError(`مقدار ${row} باید عددی بزرگ‌تر از صفر باشد`);
+    if (isExplicit(l)) {
+      // فی و مبلغ از فایل: مبلغ عیناً (به اعشار ارز پایه)، فی = فیِ فایل یا مبلغ ÷ مقدار؛ «قیمت اعلامیه» فقط اگر کالا در اعلامیه باشد برای ممیزی نگه داشته می‌شود
+      if (!allowPriceChange) throw new StoreSaleError(`فی و مبلغ ${row} از فایل آمده و مجوز «تغییر فی» را ندارید`);
+      const amount = roundToCurrencyDecimals(Number(l.amount), dp);
+      if (!Number.isFinite(amount) || amount < 0) throw new StoreSaleError(`مبلغ ${row} نامعتبر است`);
+      const rawUnit = l.unitPrice !== undefined && l.unitPrice !== null ? Number(l.unitPrice) : amount / quantity;
+      if (!Number.isFinite(rawUnit) || rawUnit < 0) throw new StoreSaleError(`فی ${row} نامعتبر است`);
+      const unitPrice = Math.round(rawUnit * 1e10) / 1e10;
+      const entry = pricing.get(item.id);
+      // ارزش افزوده: اگر در فایل آمده عیناً (به اعشار ارز پایه)، وگرنه طبق نرخ کالا روی مبلغ
+      let vatAmount: number;
+      if (l.vatAmount !== undefined && l.vatAmount !== null) {
+        vatAmount = roundToCurrencyDecimals(Number(l.vatAmount), dp);
+        if (!Number.isFinite(vatAmount) || vatAmount < 0) throw new StoreSaleError(`ارزش افزوده‌ی ${row} نامعتبر است`);
+      } else {
+        vatAmount = computeLineVat(amount, 0, resolveVatRatePercent(item, defaultVat), dp);
+      }
+      out.push({ goodsItemId: item.id, unitId: item.mainUnitId, quantity, unitPrice, amount, vatAmount, priceListId: entry ? priceListId : null, listPrice: entry ? computePrice(entry, quantity).listPrice : null, description: l.description ? String(l.description).trim() || null : null, barcode: null });
+      continue;
+    }
     const entry = pricing.get(item.id);
     if (!entry) throw new StoreSaleError(`کالای «${item.title}» (${row}) در اعلامیه‌ی قیمت ایستگاه «${station.title}» فی ندارد و قابل فروش نیست`);
     const listPrice = computePrice(entry, quantity).listPrice;
@@ -169,7 +198,7 @@ export async function cleanLines(lines: StoreSaleLineInput[] | undefined, statio
     }
     const amount = roundToCurrencyDecimals(quantity * unitPrice, dp);
     const vatAmount = computeLineVat(amount, 0, resolveVatRatePercent(item, defaultVat), dp);
-    out.push({ goodsItemId: item.id, unitId: item.mainUnitId, quantity, unitPrice, amount, vatAmount, priceListId, listPrice, description: l.description ? String(l.description).trim() || null : null, barcode });
+    out.push({ goodsItemId: item.id, unitId: item.mainUnitId, quantity, unitPrice, amount, vatAmount, priceListId: priceListId!, listPrice, description: l.description ? String(l.description).trim() || null : null, barcode });
   }
   return out;
 }
@@ -232,14 +261,14 @@ export async function revokeStoreSaleCredit(id: number) {
   await prisma.storeSale.update({ where: { id }, data: { creditDeclaredAt: null, creditDeclaredById: null, creditNote: null } });
 }
 
-export async function createStoreSale(body: StoreSaleBody, allowPriceChange: boolean) {
+export async function createStoreSale(body: StoreSaleBody, allowPriceChange: boolean, opts: { explicitAmounts?: boolean } = {}) {
   const date = parseDate(body.date);
   const { shift, shiftDate } = await loadShift(body, date);
   const station = await loadStation(shift.stationId);
   await assertAfterLastDelivery(station.id, date);
   const fp = await fiscalPeriodOf(date);
   const customer = await resolveCustomer(body.customerId, station);
-  const lines = await cleanLines(body.lines, station, date, allowPriceChange);
+  const lines = await cleanLines(body.lines, station, date, allowPriceChange, !!opts.explicitAmounts);
   const hasGoods = !!station.warehouseId && (await prisma.goodsItem.count({ where: { id: { in: lines.map((l) => l.goodsItemId) }, kind: "GOODS" } })) > 0;
   const warehouseId = hasGoods ? station.warehouseId : null;
   if (warehouseId) await assertWarehouseOpenForDate(warehouseId, date);
